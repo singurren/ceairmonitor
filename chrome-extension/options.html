@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>Ceair Monitor Bridge</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        max-width: 720px;
+        margin: 32px auto;
+        line-height: 1.5;
+      }
+      label {
+        display: block;
+        margin: 16px 0 8px;
+        font-weight: 600;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .row {
+        margin: 12px 0;
+      }
+      button {
+        padding: 10px 16px;
+        font-size: 14px;
+      }
+      #status {
+        margin-top: 16px;
+        color: #0a5;
+      }
+      pre {
+        padding: 12px;
+        background: #f5f5f5;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Ceair Monitor Bridge</h1>
+    <p>把东航航班列表响应转发给本机 WSL 服务。</p>
+
+    <div class="row">
+      <label>
+        <input id="enabled" type="checkbox">
+        启用转发
+      </label>
+    </div>
+
+    <label for="endpoint">WSL 服务接口</label>
+    <input id="endpoint" type="text" placeholder="http://127.0.0.1:8766/api/flight-result">
+
+    <div class="row">
+      <button id="save" type="button">保存</button>
+    </div>
+
+    <div id="status"></div>
+
+    <h2>最近一次回传结果</h2>
+    <pre id="last-result">暂无</pre>
+
+    <script src="options.js"></script>
+  </body>
+  </html>

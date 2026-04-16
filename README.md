@@ -21,6 +21,7 @@
 ## 主要文件
 
 - [main.py](/home/gurren/project/ceair/main.py)
+- [chrome-extension/README.md](/home/gurren/project/ceair/chrome-extension/README.md)
 - [data/config.json](/home/gurren/project/ceair/data/config.json)
 - [docs/spec.md](/home/gurren/project/ceair/docs/spec.md)
 - [prototype/index.html](/home/gurren/project/ceair/prototype/index.html)
@@ -46,6 +47,7 @@ uv sync --extra browser
 - `PATCH /api/config`
 - `POST /api/poll`
 - `POST /api/browser-probe`
+- `POST /api/flight-result`
 
 默认地址：
 
@@ -204,6 +206,29 @@ curl -X POST http://127.0.0.1:8766/api/browser-probe \
 - 浏览器上下文里是否能观察到 `shoppingv2` 响应
 
 常规轮询里，如果某条规则配置了 `start_time` 或 `end_time`，服务也会自动复用同一套 Playwright 探测逻辑做二级确认。
+
+如果后续改成由 Windows Chrome 插件或本地 agent 回传航班列表，可调用：
+
+```bash
+curl -X POST http://127.0.0.1:8766/api/flight-result \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source": "windows-chrome",
+    "date": "2026-05-08",
+    "origin": "SHA",
+    "destination": "SZX",
+    "flights": [
+      {"flight_no": "MU1234", "dep_time": "08:15", "arr_time": "10:40"},
+      {"flight_no": "MU5678", "dep_time": "13:30", "arr_time": "15:55"}
+    ]
+  }'
+```
+
+服务会：
+
+- 按本地 `rules` 规则匹配时间窗口
+- 只对新出现的命中航班生成事件
+- 复用现有 `Server酱` 通知链路
 
 浏览器探针的会话优先级现在是：
 

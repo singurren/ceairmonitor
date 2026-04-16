@@ -18,3 +18,4 @@
   - `深圳 -> 上海`，周五 `12:00` 以后
 - 实测常规轮询里的 HTTP -> Playwright 二级确认链路，确认 WAF 场景下仍能抓到 `shoppingv2`
 - 评估本机 WSL 与未来 VPS 上 Playwright 会话稳定性的差异
+- 落地 Windows Chrome 插件或本地 agent，把航班列表通过 `POST /api/flight-result` 回传到 WSL 服务

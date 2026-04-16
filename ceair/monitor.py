@@ -30,6 +30,11 @@ DEFAULT_BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/135.0.0.0 Safari/537.36"
 )
+CITY_LABELS = {
+    "SHA": "上海",
+    "PVG": "上海",
+    "SZX": "深圳",
+}
 
 
 def now_local() -> dt.datetime:
@@ -49,6 +54,10 @@ def weekday_label(date_text: str) -> str:
     labels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
     weekday = dt.date.fromisoformat(date_text).weekday()
     return labels[(weekday + 1) % 7]
+
+
+def city_label(code: str) -> str:
+    return CITY_LABELS.get(code.upper(), code.upper())
 
 
 def normalize_sendkeys(config: "AppConfig") -> list[str]:
@@ -271,6 +280,7 @@ class AppState:
     effective_poll_interval_seconds: int | None = None
     last_daily_reset_date: str | None = None
     last_summary: dict[str, Any] = field(default_factory=dict)
+    last_external_flight_result: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -724,6 +734,127 @@ class MonitorService:
             route_type=route_type,
         )
 
+    def submit_external_flight_result(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            config = self.config
+            notifier = ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds)
+
+        date_text = str(payload.get("date") or "").strip()
+        origin = str(payload.get("origin") or "").strip().upper()
+        destination = str(payload.get("destination") or "").strip().upper()
+        if not date_text or not origin or not destination:
+            raise ValueError("missing date, origin or destination")
+        dt.date.fromisoformat(date_text)
+
+        raw_flights = payload.get("flights")
+        if not isinstance(raw_flights, list):
+            raise ValueError("flights must be a list")
+
+        normalized_flights: list[dict[str, Any]] = []
+        for item in raw_flights:
+            if not isinstance(item, dict):
+                continue
+            flight_no = str(item.get("flight_no") or item.get("flightNo") or item.get("marketingFlightNo") or "").strip()
+            dep_time = str(item.get("dep_time") or item.get("depTime") or "").strip()
+            arr_time = str(item.get("arr_time") or item.get("arrTime") or "").strip()
+            flight_key = str(item.get("flight_key") or item.get("flightKey") or "").strip()
+            if not flight_no or not dep_time:
+                continue
+            normalized_flights.append(
+                {
+                    "flight_no": flight_no,
+                    "dep_time": dep_time,
+                    "arr_time": arr_time,
+                    "flight_key": flight_key,
+                }
+            )
+
+        rules = effective_rules(config)
+        matched_rules: list[dict[str, Any]] = []
+        for rule in rules:
+            if origin not in rule.origin_codes or destination not in rule.destination_codes:
+                continue
+            if not weekday_matches(date_text, rule.weekdays):
+                continue
+
+            matched_flights = [
+                flight
+                for flight in normalized_flights
+                if time_matches(flight["dep_time"], rule.start_time, rule.end_time)
+            ]
+            matched_rules.append(
+                {
+                    "rule_name": rule.name,
+                    "origin": origin,
+                    "destination": destination,
+                    "date": date_text,
+                    "time_window": {
+                        "start": rule.start_time,
+                        "end": rule.end_time,
+                        "label": time_window_label(rule.start_time, rule.end_time),
+                    },
+                    "matched_flights": matched_flights,
+                }
+            )
+
+        with self.lock:
+            previous_flight_keys = set(self.state.previous_flight_keys)
+
+        events: list[dict[str, Any]] = []
+        current_flight_keys = set(previous_flight_keys)
+        for item in matched_rules:
+            for flight in item["matched_flights"]:
+                event_key = flight_event_key(
+                    item["rule_name"],
+                    item["origin"],
+                    item["destination"],
+                    item["date"],
+                    flight["flight_no"],
+                    flight["dep_time"],
+                )
+                current_flight_keys.add(event_key)
+                if event_key in previous_flight_keys:
+                    continue
+                events.append(
+                    {
+                        "type": "flight_window_opened",
+                        "rule_name": item["rule_name"],
+                        "route": f"{item['origin']}-{item['destination']}",
+                        "origin": item["origin"],
+                        "destination": item["destination"],
+                        "date": item["date"],
+                        "flight_no": flight["flight_no"],
+                        "dep_time": flight["dep_time"],
+                        "arr_time": flight["arr_time"],
+                        "flight_key": flight["flight_key"],
+                        "time_window": item["time_window"],
+                        "detected_at": now_local().isoformat(),
+                    }
+                )
+
+        notification = self._notify(events, notifier, config)
+        result = {
+            "accepted": True,
+            "source": str(payload.get("source") or "external"),
+            "route": f"{origin}-{destination}",
+            "date": date_text,
+            "flight_count": len(normalized_flights),
+            "matched_rules": matched_rules,
+            "new_event_count": len(events),
+            "notification": notification,
+        }
+
+        with self.lock:
+            self.state.previous_flight_keys = sorted(current_flight_keys)
+            self.state.last_external_flight_result = result
+            self.state.events.extend(events)
+            self.state.events = self.state.events[-50:]
+            if isinstance(self.state.last_summary, dict):
+                self.state.last_summary["external_flight_result"] = result
+            self.state.save(self.state_path)
+
+        return result
+
     def _maybe_reset_daily_state(self) -> None:
         now = now_local()
         reset_date = now.date().isoformat()
@@ -1092,13 +1223,17 @@ class MonitorService:
         for event in events:
             if event["type"] == "flight_window_opened":
                 grouped.setdefault("flight_level", []).append(
-                    (
-                        f"{event['rule_name']} | {event['origin']} -> {event['destination']} | "
-                        f"{event['date']} {event['dep_time']} {event['flight_no']}"
+                    "\n".join(
+                        [
+                            f"{city_label(event['origin'])} -> {city_label(event['destination'])}",
+                            f"{event['date']} {weekday_label(event['date'])}",
+                            f"起飞时间：{event['dep_time']}",
+                            event["flight_no"],
+                        ]
                     )
                 )
                 continue
-            route = f"{event['rule_name']} | {event['origin']} -> {event['destination']}"
+            route = f"{city_label(event['origin'])} -> {city_label(event['destination'])}"
             grouped.setdefault(route, []).append(event["date"])
 
         lines = []
@@ -1148,6 +1283,7 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
                         "GET /api/status",
                         "POST /api/poll",
                         "POST /api/test-notify",
+                        "POST /api/flight-result",
                         "POST /api/import-flight-curl",
                         "POST /api/browser-probe",
                         "GET /prototype/index.html",
@@ -1166,6 +1302,22 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/test-notify":
             try:
                 result = self.service.send_test_notification()
+            except Exception as exc:  # noqa: BLE001
+                self._json(500, {"error": str(exc)})
+                return
+            self._json(200, result)
+            return
+        if self.path == "/api/flight-result":
+            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                payload = json.loads(self.rfile.read(length).decode() or "{}")
+                result = self.service.submit_external_flight_result(payload)
+            except json.JSONDecodeError:
+                self._json(400, {"error": "invalid json"})
+                return
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
+                return
             except Exception as exc:  # noqa: BLE001
                 self._json(500, {"error": str(exc)})
                 return
