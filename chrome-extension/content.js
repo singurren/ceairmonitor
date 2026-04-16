@@ -37,11 +37,14 @@ function onPageMessage(event) {
         pageUrl: window.location.href,
         details: event.data.payload || {}
       });
-      chrome.runtime.sendMessage({
-        type: "CEAIR_CAPTURED_BLOCKED",
-        pageUrl: window.location.href,
-        details: event.data.payload || {}
-      });
+      void sendRuntimeMessage(
+        {
+          type: "CEAIR_CAPTURED_BLOCKED",
+          pageUrl: window.location.href,
+          details: event.data.payload || {}
+        },
+        "blocked_payload"
+      );
     }
     return;
   }
@@ -70,7 +73,7 @@ function onPageMessage(event) {
     flightCount: flights.length,
     captureMeta: summarizeCaptureMeta(event.data.meta)
   });
-  sendCapturedFlights(context, flights, event.data.meta?.source || "shoppingv2_payload", event.data.meta);
+  void sendCapturedFlights(context, flights, event.data.meta?.source || "shoppingv2_payload", event.data.meta);
 }
 
 function parseFlightListContext(urlText) {
@@ -317,7 +320,7 @@ async function captureFlightsFromDom(reason) {
     reason,
     flightCount: flights.length
   });
-  sendCapturedFlights(context, flights, "rendered_dom");
+  await sendCapturedFlights(context, flights, "rendered_dom");
 }
 
 function scrapeFlightsFromDom(root) {
@@ -386,22 +389,51 @@ function extractTimes(text) {
   return Array.from(text.matchAll(/\b([01]\d|2[0-3]):[0-5]\d\b/g), (match) => match[0]);
 }
 
-function sendCapturedFlights(context, flights, source, meta = null) {
+async function sendCapturedFlights(context, flights, source, meta = null) {
   const signature = `${context.origin}-${context.destination}-${context.date}:${flights
     .map((flight) => `${flight.flight_no}@${flight.dep_time}`)
     .sort()
     .join("|")}`;
   if (window.__ceairMonitorState.lastCaptureSignature === signature) {
+    await recordTrace("capture_send_skipped_duplicate", {
+      pageUrl: window.location.href,
+      context,
+      captureSource: source,
+      captureMeta: summarizeCaptureMeta(meta),
+      flightCount: flights.length
+    });
     return;
   }
   window.__ceairMonitorState.lastCaptureSignature = signature;
-  chrome.runtime.sendMessage({
+  const payload = {
     type: "CEAIR_CAPTURED_FLIGHTS",
     captureSource: source,
     captureMeta: summarizeCaptureMeta(meta),
     ...context,
     flights
-  });
+  };
+  await sendRuntimeMessage(payload, source);
+}
+
+async function sendRuntimeMessage(payload, reason) {
+  try {
+    const response = await chrome.runtime.sendMessage(payload);
+    await recordTrace("capture_send_ack", {
+      pageUrl: window.location.href,
+      reason,
+      messageType: payload.type,
+      response: response || null
+    });
+    return response;
+  } catch (error) {
+    await recordTrace("capture_send_failed", {
+      pageUrl: window.location.href,
+      reason,
+      messageType: payload.type,
+      error: String(error)
+    });
+    return null;
+  }
 }
 
 function summarizeCaptureMeta(meta) {

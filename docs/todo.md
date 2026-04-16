@@ -31,6 +31,8 @@
 - 观察新增 trace：
   - `dom_flights_not_found`
   - `dom_flights_captured`
+  - `capture_send_ack`
+  - `capture_send_failed`
 - 观察最近回传结果和后台 trace 里的：
   - `captureSource`
   - `captureMeta`

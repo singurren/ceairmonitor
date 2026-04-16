@@ -48,6 +48,8 @@
   - `shoppingv2_empty_flights`
   - `dom_flights_not_found`
   - `dom_flights_captured`
+  - `capture_send_ack`
+  - `capture_send_failed`
   - `background_received_flights`
   - `forward_completed`
 - `background_received_flights` 和 `forward_completed` 里现在会额外带：
