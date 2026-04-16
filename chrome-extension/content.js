@@ -2,7 +2,8 @@
   window.__ceairMonitorState = window.__ceairMonitorState || {
     domObserverStarted: false,
     domCaptureTimer: 0,
-    lastCaptureSignature: "",
+    lastAckedCaptureSignature: "",
+    inflightCaptureSignature: "",
     lastDomTraceSignature: ""
   };
 })();
@@ -394,17 +395,29 @@ async function sendCapturedFlights(context, flights, source, meta = null) {
     .map((flight) => `${flight.flight_no}@${flight.dep_time}`)
     .sort()
     .join("|")}`;
-  if (window.__ceairMonitorState.lastCaptureSignature === signature) {
+  if (window.__ceairMonitorState.lastAckedCaptureSignature === signature) {
     await recordTrace("capture_send_skipped_duplicate", {
       pageUrl: window.location.href,
       context,
       captureSource: source,
       captureMeta: summarizeCaptureMeta(meta),
-      flightCount: flights.length
+      flightCount: flights.length,
+      dedupeState: "acked"
     });
     return;
   }
-  window.__ceairMonitorState.lastCaptureSignature = signature;
+  if (window.__ceairMonitorState.inflightCaptureSignature === signature) {
+    await recordTrace("capture_send_skipped_duplicate", {
+      pageUrl: window.location.href,
+      context,
+      captureSource: source,
+      captureMeta: summarizeCaptureMeta(meta),
+      flightCount: flights.length,
+      dedupeState: "inflight"
+    });
+    return;
+  }
+  window.__ceairMonitorState.inflightCaptureSignature = signature;
   const payload = {
     type: "CEAIR_CAPTURED_FLIGHTS",
     captureSource: source,
@@ -412,7 +425,13 @@ async function sendCapturedFlights(context, flights, source, meta = null) {
     ...context,
     flights
   };
-  await sendRuntimeMessage(payload, source);
+  const response = await sendRuntimeMessage(payload, source);
+  if (response?.ok) {
+    window.__ceairMonitorState.lastAckedCaptureSignature = signature;
+  }
+  if (window.__ceairMonitorState.inflightCaptureSignature === signature) {
+    window.__ceairMonitorState.inflightCaptureSignature = "";
+  }
 }
 
 async function sendRuntimeMessage(payload, reason) {

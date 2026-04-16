@@ -50,6 +50,7 @@
   - `dom_flights_captured`
   - `capture_send_ack`
   - `capture_send_failed`
+  - `capture_send_skipped_duplicate`
   - `background_received_flights`
   - `forward_completed`
 - `background_received_flights` 和 `forward_completed` 里现在会额外带：
@@ -61,3 +62,8 @@
 - `shoppingv2_payload`
 - `window_scan_*`
 - `rendered_dom`
+
+`capture_send_skipped_duplicate` 现在还会区分：
+
+- `dedupeState = "acked"`：后台已经成功确认过，这次才跳过
+- `dedupeState = "inflight"`：同一批航班正在发送中，短暂去重

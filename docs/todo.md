@@ -33,9 +33,11 @@
   - `dom_flights_captured`
   - `capture_send_ack`
   - `capture_send_failed`
+  - `capture_send_skipped_duplicate`
 - 观察最近回传结果和后台 trace 里的：
   - `captureSource`
   - `captureMeta`
+- 确认 duplicate 去重现在只在“后台已成功确认”后生效，而不是在发送前就锁死
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`
   - `POST /api/browser-probe`
