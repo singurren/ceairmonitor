@@ -15,6 +15,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (Object.keys(next).length > 0) {
     await chrome.storage.local.set(next);
   }
+  await chrome.storage.local.set({
+    lastTrace: {
+      stage: "extension_installed",
+      details: {},
+      recordedAt: new Date().toISOString()
+    }
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -36,8 +43,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function handleCapturedFlights(message) {
+  await setTrace("background_received_flights", {
+    route: `${message.origin}-${message.destination}`,
+    date: message.date,
+    flightCount: Array.isArray(message.flights) ? message.flights.length : 0
+  });
   const settings = await chrome.storage.local.get(["enabled", "endpoint"]);
   if (settings.enabled === false) {
+    await setTrace("forward_skipped_disabled", {});
     return { skipped: true, reason: "disabled" };
   }
 
@@ -75,6 +88,7 @@ async function handleCapturedFlights(message) {
     date: message.date
   };
   await chrome.storage.local.set({ lastResult: result });
+  await setTrace("forward_completed", result);
   return result;
 }
 
@@ -90,5 +104,16 @@ async function handleBlockedCapture(message) {
     sentAt: new Date().toISOString()
   };
   await chrome.storage.local.set({ lastResult: result });
+  await setTrace("blocked_response_seen", result);
   return result;
+}
+
+async function setTrace(stage, details) {
+  await chrome.storage.local.set({
+    lastTrace: {
+      stage,
+      details,
+      recordedAt: new Date().toISOString()
+    }
+  });
 }

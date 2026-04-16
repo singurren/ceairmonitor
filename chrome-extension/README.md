@@ -33,3 +33,10 @@
   - `GET /api/status`
   - `state.last_external_flight_result`
 - 如果扩展选项页里的“最近回传结果”显示 `shoppingv2_non_json`，说明插件已经看到了航班接口，但返回的是滑块/WAF 页面，不是航班 JSON
+- 扩展选项页里的“最近一次调试痕迹”会显示当前走到哪一层，例如：
+  - `content_bootstrap`
+  - `page_hook_injected`
+  - `context_parse_failed`
+  - `shoppingv2_captured`
+  - `background_received_flights`
+  - `forward_completed`

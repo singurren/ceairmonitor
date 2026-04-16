@@ -1,4 +1,5 @@
 (function bootstrap() {
+  void recordTrace("content_bootstrap", { pageUrl: window.location.href });
   injectPageHook();
   window.addEventListener("message", onPageMessage);
 })();
@@ -13,6 +14,7 @@ function injectPageHook() {
   script.async = false;
   document.documentElement.appendChild(script);
   script.remove();
+  void recordTrace("page_hook_injected", { pageUrl: window.location.href });
 }
 
 function onPageMessage(event) {
@@ -21,6 +23,10 @@ function onPageMessage(event) {
   }
   if (event.data?.type !== "CEAIR_SHOPPINGV2_CAPTURE") {
     if (event.data?.type === "CEAIR_SHOPPINGV2_BLOCKED") {
+      void recordTrace("shoppingv2_blocked", {
+        pageUrl: window.location.href,
+        details: event.data.payload || {}
+      });
       chrome.runtime.sendMessage({
         type: "CEAIR_CAPTURED_BLOCKED",
         pageUrl: window.location.href,
@@ -32,14 +38,24 @@ function onPageMessage(event) {
 
   const context = parseFlightListContext(window.location.href);
   if (!context) {
+    void recordTrace("context_parse_failed", { pageUrl: window.location.href });
     return;
   }
 
   const flights = normalizeFlights(event.data.payload);
   if (flights.length === 0) {
+    void recordTrace("shoppingv2_empty_flights", {
+      pageUrl: window.location.href,
+      context
+    });
     return;
   }
 
+  void recordTrace("shoppingv2_captured", {
+    pageUrl: window.location.href,
+    context,
+    flightCount: flights.length
+  });
   chrome.runtime.sendMessage({
     type: "CEAIR_CAPTURED_FLIGHTS",
     ...context,
@@ -116,4 +132,18 @@ function normalizeFlights(payload) {
       flight_key: String(flight.flightKey || "").trim()
     }))
     .filter((flight) => flight.flight_no && flight.dep_time);
+}
+
+async function recordTrace(stage, details) {
+  try {
+    await chrome.storage.local.set({
+      lastTrace: {
+        stage,
+        details,
+        recordedAt: new Date().toISOString()
+      }
+    });
+  } catch {
+    // ignore storage failures
+  }
 }
