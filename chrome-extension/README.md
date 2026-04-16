@@ -39,6 +39,7 @@
 - 如果扩展选项页里的“最近回传结果”显示 `shoppingv2_non_json`，说明插件已经看到了航班接口，但返回的是滑块/WAF 页面，不是航班 JSON
 - 如果出现 `shoppingv2_empty_flights`，说明插件看到了接口响应，但没有从返回体里直接解出航班数组
 - 当前插件已经新增 DOM 兜底：即使 `shoppingv2` 是密文包装，也会继续尝试从页面最终渲染出来的航班文本里抽取结果
+- 当前插件还会额外尝试扫描页面常见全局状态对象，如果页面状态层里已经持有航班数组，也会直接提取并回传
 - 扩展选项页里的“最近一次调试痕迹”会显示当前走到哪一层，例如：
   - `content_bootstrap`
   - `page_hook_injected`
@@ -49,3 +50,12 @@
   - `dom_flights_captured`
   - `background_received_flights`
   - `forward_completed`
+- `background_received_flights` 和 `forward_completed` 里现在会额外带：
+  - `captureSource`
+  - `captureMeta`
+
+这些字段用于区分本次命中到底来自：
+
+- `shoppingv2_payload`
+- `window_scan_*`
+- `rendered_dom`

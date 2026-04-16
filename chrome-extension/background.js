@@ -46,7 +46,9 @@ async function handleCapturedFlights(message) {
   await setTrace("background_received_flights", {
     route: `${message.origin}-${message.destination}`,
     date: message.date,
-    flightCount: Array.isArray(message.flights) ? message.flights.length : 0
+    flightCount: Array.isArray(message.flights) ? message.flights.length : 0,
+    captureSource: message.captureSource || "",
+    captureMeta: message.captureMeta || {}
   });
   const settings = await chrome.storage.local.get(["enabled", "endpoint"]);
   if (settings.enabled === false) {
@@ -85,7 +87,9 @@ async function handleCapturedFlights(message) {
     sentAt: new Date().toISOString(),
     flightCount: Array.isArray(message.flights) ? message.flights.length : 0,
     route: `${message.origin}-${message.destination}`,
-    date: message.date
+    date: message.date,
+    captureSource: message.captureSource || "",
+    captureMeta: message.captureMeta || {}
   };
   await chrome.storage.local.set({ lastResult: result });
   await setTrace("forward_completed", result);

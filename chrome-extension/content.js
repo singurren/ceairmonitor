@@ -57,7 +57,8 @@ function onPageMessage(event) {
     void recordTrace("shoppingv2_empty_flights", {
       pageUrl: window.location.href,
       context,
-      payloadSummary: summarizePayload(event.data.payload)
+      payloadSummary: summarizePayload(event.data.payload),
+      captureMeta: summarizeCaptureMeta(event.data.meta)
     });
     scheduleDomFlightCheck("shoppingv2_empty_flights");
     return;
@@ -66,9 +67,10 @@ function onPageMessage(event) {
   void recordTrace("shoppingv2_captured", {
     pageUrl: window.location.href,
     context,
-    flightCount: flights.length
+    flightCount: flights.length,
+    captureMeta: summarizeCaptureMeta(event.data.meta)
   });
-  sendCapturedFlights(context, flights, "shoppingv2_payload");
+  sendCapturedFlights(context, flights, event.data.meta?.source || "shoppingv2_payload", event.data.meta);
 }
 
 function parseFlightListContext(urlText) {
@@ -384,7 +386,7 @@ function extractTimes(text) {
   return Array.from(text.matchAll(/\b([01]\d|2[0-3]):[0-5]\d\b/g), (match) => match[0]);
 }
 
-function sendCapturedFlights(context, flights, source) {
+function sendCapturedFlights(context, flights, source, meta = null) {
   const signature = `${context.origin}-${context.destination}-${context.date}:${flights
     .map((flight) => `${flight.flight_no}@${flight.dep_time}`)
     .sort()
@@ -396,9 +398,22 @@ function sendCapturedFlights(context, flights, source) {
   chrome.runtime.sendMessage({
     type: "CEAIR_CAPTURED_FLIGHTS",
     captureSource: source,
+    captureMeta: summarizeCaptureMeta(meta),
     ...context,
     flights
   });
+}
+
+function summarizeCaptureMeta(meta) {
+  if (!meta || typeof meta !== "object") {
+    return {};
+  }
+  return {
+    source: String(meta.source || ""),
+    responseUrl: String(meta.responseUrl || ""),
+    status: Number(meta.status || 0),
+    objectPath: String(meta.objectPath || "")
+  };
 }
 
 async function recordTrace(stage, details) {

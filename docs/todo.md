@@ -12,6 +12,7 @@
 
 - 让 `WSL` 服务继续只负责日期级筛选、规则匹配、航班级事件去重和通知
 - 继续在 Windows Chrome 插件里定位“页面最终用于渲染的航班数组”抓取点
+- 验证最新页面状态扫描逻辑是否能直接从全局状态对象里拿到航班数组
 - 验证最新 DOM 兜底逻辑是否能从页面最终渲染结果中稳定抽到：
   - `flight_no`
   - `dep_time`
@@ -30,6 +31,9 @@
 - 观察新增 trace：
   - `dom_flights_not_found`
   - `dom_flights_captured`
+- 观察最近回传结果和后台 trace 里的：
+  - `captureSource`
+  - `captureMeta`
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`
   - `POST /api/browser-probe`

@@ -6,6 +6,7 @@
 
   installCryptoHooks();
   installTextDecoderHook();
+  startGlobalFlightScan();
 
   const originalJsonParse = JSON.parse;
   JSON.parse = function patchedJsonParse(...args) {
@@ -98,19 +99,7 @@
     if (!Array.isArray(flights) || flights.length === 0) {
       return;
     }
-    window.postMessage(
-      {
-        type: "CEAIR_SHOPPINGV2_CAPTURE",
-        payload,
-        meta: {
-          source: meta.source || "unknown",
-          responseUrl: meta.responseUrl || "",
-          status: meta.status || 0,
-          inputPreview: meta.inputPreview || ""
-        }
-      },
-      "*"
-    );
+    postCapture(payload, meta);
   }
 
   function unwrapShoppingPayload(payload) {
@@ -214,6 +203,154 @@
     } catch {
       // ignore non-json strings
     }
+  }
+
+  function startGlobalFlightScan() {
+    const delays = [500, 1500, 3000, 5000, 8000];
+    for (const delay of delays) {
+      window.setTimeout(() => {
+        tryGlobalFlightScan(`window_scan_${delay}ms`);
+      }, delay);
+    }
+  }
+
+  function tryGlobalFlightScan(source) {
+    const seen = new Set();
+    const queue = [
+      { value: window.__NEXT_DATA__, path: "window.__NEXT_DATA__" },
+      { value: window.__INITIAL_STATE__, path: "window.__INITIAL_STATE__" },
+      { value: window.__NUXT__, path: "window.__NUXT__" },
+      { value: window.__STORE__, path: "window.__STORE__" },
+      { value: window.$store, path: "window.$store" },
+      { value: window.store, path: "window.store" },
+      { value: window.app, path: "window.app" },
+      { value: window.__APP_DATA__, path: "window.__APP_DATA__" }
+    ];
+
+    while (queue.length > 0 && seen.size < 200) {
+      const current = queue.shift();
+      if (!current || !current.value || typeof current.value !== "object") {
+        continue;
+      }
+      if (seen.has(current.value)) {
+        continue;
+      }
+      seen.add(current.value);
+
+      const flights = extractFlightsFromObject(current.value);
+      if (flights.length > 0) {
+        postCapture(
+          {
+            data: {
+              flights
+            }
+          },
+          {
+            source,
+            objectPath: current.path
+          }
+        );
+        return;
+      }
+
+      for (const [key, child] of Object.entries(current.value).slice(0, 30)) {
+        if (child && typeof child === "object") {
+          queue.push({
+            value: child,
+            path: `${current.path}.${key}`
+          });
+        }
+      }
+    }
+  }
+
+  function extractFlightsFromObject(value) {
+    const queue = [value];
+    const seen = new Set();
+    while (queue.length > 0 && seen.size < 300) {
+      const current = queue.shift();
+      if (!current || typeof current !== "object") {
+        continue;
+      }
+      if (seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+
+      if (Array.isArray(current)) {
+        const flights = normalizeFlightArray(current);
+        if (flights.length > 0) {
+          return flights;
+        }
+        for (const item of current.slice(0, 30)) {
+          if (item && typeof item === "object") {
+            queue.push(item);
+          }
+        }
+        continue;
+      }
+
+      for (const child of Object.values(current).slice(0, 30)) {
+        if (child && typeof child === "object") {
+          queue.push(child);
+        }
+      }
+    }
+    return [];
+  }
+
+  function normalizeFlightArray(items) {
+    const normalized = [];
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const flightNo = String(item.flightNo || item.marketingFlightNo || item.flightCode || item.flight_no || "").trim();
+      const depTime = String(item.depTime || item.dep_time || "").trim();
+      const arrTime = String(item.arrTime || item.arr_time || "").trim();
+      const flightKey = String(item.flightKey || item.flight_key || "").trim();
+      if (!flightNo || !depTime) {
+        continue;
+      }
+      normalized.push({
+        flightNo,
+        depTime,
+        arrTime,
+        flightKey
+      });
+    }
+    return dedupeFlights(normalized);
+  }
+
+  function dedupeFlights(flights) {
+    const result = [];
+    const seen = new Set();
+    for (const flight of flights) {
+      const key = `${flight.flightNo}:${flight.depTime}:${flight.arrTime}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      result.push(flight);
+    }
+    return result;
+  }
+
+  function postCapture(payload, meta = {}) {
+    window.postMessage(
+      {
+        type: "CEAIR_SHOPPINGV2_CAPTURE",
+        payload,
+        meta: {
+          source: meta.source || "unknown",
+          responseUrl: meta.responseUrl || "",
+          status: meta.status || 0,
+          inputPreview: meta.inputPreview || "",
+          objectPath: meta.objectPath || ""
+        }
+      },
+      "*"
+    );
   }
 
   function isShoppingUrl(url) {
