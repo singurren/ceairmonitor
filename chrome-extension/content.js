@@ -120,7 +120,8 @@ function decodeBase64Json(input) {
 }
 
 function normalizeFlights(payload) {
-  const flights = payload?.data?.flights;
+  const normalizedPayload = unwrapShoppingPayload(payload);
+  const flights = normalizedPayload?.data?.flights;
   if (!Array.isArray(flights)) {
     return [];
   }
@@ -142,18 +143,54 @@ function summarizePayload(payload) {
     };
   }
 
-  const data = payload.data && typeof payload.data === "object" ? payload.data : null;
+  const normalizedPayload = unwrapShoppingPayload(payload);
+  const data = normalizedPayload?.data && typeof normalizedPayload.data === "object" ? normalizedPayload.data : null;
   return {
     topLevelKeys: Object.keys(payload).slice(0, 20),
+    normalizedTopLevelKeys:
+      normalizedPayload && typeof normalizedPayload === "object"
+        ? Object.keys(normalizedPayload).slice(0, 20)
+        : [],
     dataKeys: data ? Object.keys(data).slice(0, 30) : [],
-    code: payload.code ?? null,
-    success: payload.success ?? null,
-    message: payload.message ?? payload.msg ?? "",
+    code: normalizedPayload?.code ?? payload.code ?? null,
+    success: normalizedPayload?.success ?? payload.success ?? null,
+    message: normalizedPayload?.message ?? normalizedPayload?.msg ?? payload.message ?? payload.msg ?? "",
     flightListType: Array.isArray(data?.flights) ? "array" : typeof data?.flights,
     flightListLength: Array.isArray(data?.flights) ? data.flights.length : null,
     firstDataArrayKey: findFirstArrayKey(data),
     firstDataArrayLength: firstArrayLength(data)
   };
+}
+
+function unwrapShoppingPayload(payload) {
+  let current = payload;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== "object") {
+      return null;
+    }
+    if (current.data && typeof current.data === "object") {
+      return current;
+    }
+    if (!("res" in current)) {
+      return current;
+    }
+    current = parseNestedPayload(current.res);
+  }
+  return current && typeof current === "object" ? current : null;
+}
+
+function parseNestedPayload(value) {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return typeof value === "object" ? value : null;
 }
 
 function findFirstArrayKey(data) {
