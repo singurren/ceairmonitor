@@ -40,5 +40,46 @@
   "playwright_is_mobile": true,
   "playwright_has_touch": true,
   "playwright_device_scale_factor": 3.0,
-  "rules": []
+  "rules": [
+    {
+      "name": "去程 上海到深圳 周一早班",
+      "origin_codes": [
+        "SHA"
+      ],
+      "destination_codes": [
+        "SZX"
+      ],
+      "weekdays": [
+        1
+      ],
+      "start_time": "07:30",
+      "end_time": "09:30"
+    },
+    {
+      "name": "返程 深圳到上海 周四下午",
+      "origin_codes": [
+        "SZX"
+      ],
+      "destination_codes": [
+        "SHA"
+      ],
+      "weekdays": [
+        4
+      ],
+      "start_time": "16:00"
+    },
+    {
+      "name": "返程 深圳到上海 周五中午后",
+      "origin_codes": [
+        "SZX"
+      ],
+      "destination_codes": [
+        "SHA"
+      ],
+      "weekdays": [
+        5
+      ],
+      "start_time": "12:00"
+    }
+  ]
 }
