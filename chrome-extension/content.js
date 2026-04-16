@@ -151,6 +151,9 @@ function summarizePayload(payload) {
       normalizedPayload && typeof normalizedPayload === "object"
         ? Object.keys(normalizedPayload).slice(0, 20)
         : [],
+    resType: typeof payload.res,
+    resLength: typeof payload.res === "string" ? payload.res.length : null,
+    resPreview: previewValue(payload.res),
     dataKeys: data ? Object.keys(data).slice(0, 30) : [],
     code: normalizedPayload?.code ?? payload.code ?? null,
     success: normalizedPayload?.success ?? payload.success ?? null,
@@ -191,6 +194,20 @@ function parseNestedPayload(value) {
     }
   }
   return typeof value === "object" ? value : null;
+}
+
+function previewValue(value) {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.slice(0, 200);
+  }
+  try {
+    return JSON.stringify(value).slice(0, 200);
+  } catch {
+    return String(value).slice(0, 200);
+  }
 }
 
 function findFirstArrayKey(data) {
