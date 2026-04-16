@@ -56,6 +56,10 @@
 - `background_received_flights` 和 `forward_completed` 里现在会额外带：
   - `captureSource`
   - `captureMeta`
+- 如果后台转发接口本身访问失败，还会出现：
+  - `forward_failed`
+  - `networkError`
+  - `endpoint`
 
 这些字段用于区分本次命中到底来自：
 
@@ -67,3 +71,15 @@
 
 - `dedupeState = "acked"`：后台已经成功确认过，这次才跳过
 - `dedupeState = "inflight"`：同一批航班正在发送中，短暂去重
+
+如果看到 `capture_send_ack` 但其中 `response.ok = false` 且报 `TypeError: Failed to fetch`，说明：
+
+- 页面抓取已经成功
+- 内容脚本到扩展后台已经成功
+- 真正失败点在扩展后台访问你配置的接口地址
+
+这时优先检查：
+
+- 扩展选项里的 endpoint 是否仍是 `http://127.0.0.1:8766/api/flight-result`
+- 这个地址在 Windows Chrome 所在环境里是否真的能访问到 WSL 服务
+- 是否需要改成 Windows 可访问的 WSL IP，例如 `http://172.x.x.x:8766/api/flight-result`

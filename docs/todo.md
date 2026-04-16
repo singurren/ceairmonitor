@@ -34,9 +34,12 @@
   - `capture_send_ack`
   - `capture_send_failed`
   - `capture_send_skipped_duplicate`
+  - `forward_failed`
 - 观察最近回传结果和后台 trace 里的：
   - `captureSource`
   - `captureMeta`
+- 验证扩展后台到本地服务 endpoint 的可达性，而不是继续怀疑抓取链
+- 必要时把插件 endpoint 从 `127.0.0.1` 改成 Windows 可访问的 WSL IP
 - 确认 duplicate 去重现在只在“后台已成功确认”后生效，而不是在发送前就锁死
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`

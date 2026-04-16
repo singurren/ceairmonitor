@@ -7,8 +7,8 @@
     "storage"
   ],
   "host_permissions": [
-    "http://127.0.0.1:8766/*",
-    "http://localhost:8766/*",
+    "http://*/*",
+    "https://*/*",
     "https://m.ceair.com/*",
     "https://ecactivity.ceair.com/*"
   ],

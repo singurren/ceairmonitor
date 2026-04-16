@@ -65,35 +65,54 @@ async function handleCapturedFlights(message) {
     flights: message.flights
   };
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-  const text = await response.text();
-  let body;
   try {
-    body = JSON.parse(text);
-  } catch {
-    body = { raw: text };
-  }
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { raw: text };
+    }
 
-  const result = {
-    ok: response.ok,
-    status: response.status,
-    body,
-    sentAt: new Date().toISOString(),
-    flightCount: Array.isArray(message.flights) ? message.flights.length : 0,
-    route: `${message.origin}-${message.destination}`,
-    date: message.date,
-    captureSource: message.captureSource || "",
-    captureMeta: message.captureMeta || {}
-  };
-  await chrome.storage.local.set({ lastResult: result });
-  await setTrace("forward_completed", result);
-  return result;
+    const result = {
+      ok: response.ok,
+      status: response.status,
+      body,
+      endpoint,
+      sentAt: new Date().toISOString(),
+      flightCount: Array.isArray(message.flights) ? message.flights.length : 0,
+      route: `${message.origin}-${message.destination}`,
+      date: message.date,
+      captureSource: message.captureSource || "",
+      captureMeta: message.captureMeta || {}
+    };
+    await chrome.storage.local.set({ lastResult: result });
+    await setTrace("forward_completed", result);
+    return result;
+  } catch (error) {
+    const result = {
+      ok: false,
+      networkError: true,
+      error: String(error),
+      endpoint,
+      sentAt: new Date().toISOString(),
+      flightCount: Array.isArray(message.flights) ? message.flights.length : 0,
+      route: `${message.origin}-${message.destination}`,
+      date: message.date,
+      captureSource: message.captureSource || "",
+      captureMeta: message.captureMeta || {}
+    };
+    await chrome.storage.local.set({ lastResult: result });
+    await setTrace("forward_failed", result);
+    throw error;
+  }
 }
 
 async function handleBlockedCapture(message) {
