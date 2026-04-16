@@ -1,10 +1,11 @@
 const DEFAULT_SETTINGS = {
   enabled: true,
-  endpoint: "http://127.0.0.1:8766/api/flight-result"
+  endpoint: "http://127.0.0.1:8766/api/flight-result",
+  autoOpenEnabled: true
 };
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const current = await chrome.storage.local.get(["enabled", "endpoint"]);
+  const current = await chrome.storage.local.get(["enabled", "endpoint", "autoOpenEnabled"]);
   const next = {};
   if (typeof current.enabled !== "boolean") {
     next.enabled = DEFAULT_SETTINGS.enabled;
@@ -12,9 +13,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (!current.endpoint) {
     next.endpoint = DEFAULT_SETTINGS.endpoint;
   }
+  if (typeof current.autoOpenEnabled !== "boolean") {
+    next.autoOpenEnabled = DEFAULT_SETTINGS.autoOpenEnabled;
+  }
   if (Object.keys(next).length > 0) {
     await chrome.storage.local.set(next);
   }
+  chrome.alarms.create("ceair-auto-open", { periodInMinutes: 1 });
   await chrome.storage.local.set({
     lastTrace: {
       stage: "extension_installed",
@@ -22,6 +27,18 @@ chrome.runtime.onInstalled.addListener(async () => {
       recordedAt: new Date().toISOString()
     }
   });
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  chrome.alarms.create("ceair-auto-open", { periodInMinutes: 1 });
+  void pollAutoOpenTasks("startup");
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== "ceair-auto-open") {
+    return;
+  }
+  void pollAutoOpenTasks("alarm");
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -116,6 +133,130 @@ async function handleCapturedFlights(message) {
     await setTrace("forward_failed", result);
     throw error;
   }
+}
+
+async function pollAutoOpenTasks(reason) {
+  const settings = await chrome.storage.local.get([
+    "enabled",
+    "endpoint",
+    "autoOpenEnabled",
+    "autoOpenedTaskKeys"
+  ]);
+  if (settings.enabled === false || settings.autoOpenEnabled === false) {
+    return;
+  }
+
+  const endpoint = String(settings.endpoint || DEFAULT_SETTINGS.endpoint);
+  const statusEndpoint = deriveStatusEndpoint(endpoint);
+  if (!statusEndpoint) {
+    await setTrace("auto_open_invalid_endpoint", { endpoint, reason });
+    return;
+  }
+
+  try {
+    const response = await fetch(statusEndpoint);
+    const body = await response.json();
+    const tasks = extractAutoOpenTasks(body);
+    const autoOpenedTaskKeys = settings.autoOpenedTaskKeys || {};
+    let openedCount = 0;
+
+    for (const task of tasks) {
+      const taskKey = `${task.origin}-${task.destination}:${task.date}`;
+      if (autoOpenedTaskKeys[taskKey]) {
+        continue;
+      }
+      const url = buildFlightListUrl(task.origin, task.destination, task.date, task.productCode, task.routeType);
+      await openOrFocusTab(url);
+      autoOpenedTaskKeys[taskKey] = new Date().toISOString();
+      openedCount += 1;
+    }
+
+    await chrome.storage.local.set({ autoOpenedTaskKeys });
+    await setTrace("auto_open_poll_completed", {
+      reason,
+      endpoint: statusEndpoint,
+      taskCount: tasks.length,
+      openedCount
+    });
+  } catch (error) {
+    await setTrace("auto_open_poll_failed", {
+      reason,
+      endpoint: statusEndpoint,
+      error: String(error)
+    });
+  }
+}
+
+function deriveStatusEndpoint(endpoint) {
+  try {
+    const url = new URL(endpoint);
+    url.pathname = "/api/status";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function extractAutoOpenTasks(statusBody) {
+  const ruleMatches = statusBody?.state?.last_summary?.rule_matches;
+  if (!Array.isArray(ruleMatches)) {
+    return [];
+  }
+  const tasks = [];
+  const seen = new Set();
+  for (const item of ruleMatches) {
+    if (!item || item.status !== "2") {
+      continue;
+    }
+    const origin = String(item.origin || "").toUpperCase();
+    const destination = String(item.destination || "").toUpperCase();
+    const date = String(item.date || "");
+    const productCode = String(item.product_code || statusBody?.config?.product_code || "").trim();
+    const routeType = String(item.route_type || statusBody?.config?.route_type || "OW").trim();
+    if (!origin || !destination || !date || !productCode) {
+      continue;
+    }
+    const key = `${origin}-${destination}:${date}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    tasks.push({ origin, destination, date, productCode, routeType });
+  }
+  return tasks;
+}
+
+function buildFlightListUrl(origin, destination, dateText, productCode, routeType) {
+  const tripType = routeType === "OW" ? 0 : 1;
+  const payload = {
+    tripType,
+    depCode: origin,
+    arrCode: destination,
+    dt: "1",
+    at: "1",
+    depN: "",
+    arrN: "",
+    flightDate: String(dateText).replace(/-/g, ""),
+    carryChd: "0",
+    carryInf: "0",
+    productType: "CASH",
+    curIndex: 0,
+    zoneCode: "PROMOTION_PRODUCT_ZONE",
+    productCode
+  };
+  return `https://m.ceair.com/mapp/reserve/flightList?newParam=${encodeURIComponent(JSON.stringify(payload))}`;
+}
+
+async function openOrFocusTab(url) {
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find((tab) => tab.url === url);
+  if (existing?.id) {
+    await chrome.tabs.update(existing.id, { active: true, url });
+    return;
+  }
+  await chrome.tabs.create({ url, active: false });
 }
 
 async function handleBlockedCapture(message) {

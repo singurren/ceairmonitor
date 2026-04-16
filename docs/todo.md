@@ -48,6 +48,10 @@
   - `flights`
   - `flightCount`
   - `captureSource`
+- 验证自动开页链路：
+  - `auto_open_poll_completed`
+  - `openedCount`
+  - 自动打开的 `flightList` 页面是否随后产生 `forward_completed`
 - 确认 duplicate 去重现在只在“后台已成功确认”后生效，而不是在发送前就锁死
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`

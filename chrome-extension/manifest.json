@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "description": "Capture China Eastern flight-list responses and forward them to the local ceair monitor service.",
   "permissions": [
-    "storage"
+    "storage",
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
     "http://*/*",

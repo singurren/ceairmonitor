@@ -25,6 +25,12 @@
 - 已启用转发
 - 接口地址是 `http://127.0.0.1:8766/api/flight-result`
 
+当前扩展还会默认开启“自动开页”：
+
+- 后台会定时轮询 `endpoint` 对应的 `/api/status`
+- 如果 WSL 服务最新状态里出现可兑日期任务，扩展会自动打开对应航班列表页
+- 打开后再由内容脚本抓取当天全部航班并回传
+
 ## 调试
 
 - 不要把“打开 DevTools 后刷新页面”当成默认调试方式
@@ -90,3 +96,12 @@
 - 先看插件“最近一次回传结果”里的 `flights`
 - 只要这里已经出现当天全部航班，说明插件抓取主线已经工作
 - `matched_rules / new_event_count / notification` 这些是后续业务联调阶段再看的结果
+
+如果要验证自动化链路是否工作，重点看：
+
+- 是否出现：
+  - `auto_open_poll_completed`
+- 它的 `openedCount` 是否大于 `0`
+- 随后是否出现：
+  - `dom_flights_captured`
+  - `forward_completed`
