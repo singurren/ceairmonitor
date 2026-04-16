@@ -21,7 +21,10 @@
 
   XMLHttpRequest.prototype.send = function patchedSend(body) {
     this.addEventListener("load", function onLoad() {
-      captureRawResponse(this.__ceairMonitorUrl, this.responseText);
+      captureRawResponse(this.__ceairMonitorUrl, this.responseText, {
+        status: this.status,
+        contentType: this.getResponseHeader("content-type") || ""
+      });
     });
     return originalSend.call(this, body);
   };
@@ -34,13 +37,16 @@
     try {
       const cloned = response.clone();
       const text = await cloned.text();
-      captureRawResponse(url, text);
+      captureRawResponse(url, text, {
+        status: response.status,
+        contentType: response.headers.get("content-type") || ""
+      });
     } catch {
       // ignore parse failures from page hook
     }
   }
 
-  function captureRawResponse(url, text) {
+  function captureRawResponse(url, text, meta = {}) {
     if (!isShoppingUrl(url)) {
       return;
     }
@@ -54,7 +60,17 @@
         "*"
       );
     } catch {
-      // ignore non-json responses
+      window.postMessage(
+        {
+          type: "CEAIR_SHOPPINGV2_BLOCKED",
+          payload: {
+            status: meta.status || 0,
+            contentType: meta.contentType || "",
+            bodyPreview: String(text || "").slice(0, 200)
+          }
+        },
+        "*"
+      );
     }
   }
 

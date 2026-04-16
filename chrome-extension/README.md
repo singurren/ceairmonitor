@@ -32,3 +32,4 @@
 - WSL 服务侧检查：
   - `GET /api/status`
   - `state.last_external_flight_result`
+- 如果扩展选项页里的“最近回传结果”显示 `shoppingv2_non_json`，说明插件已经看到了航班接口，但返回的是滑块/WAF 页面，不是航班 JSON

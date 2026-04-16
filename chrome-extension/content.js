@@ -20,6 +20,13 @@ function onPageMessage(event) {
     return;
   }
   if (event.data?.type !== "CEAIR_SHOPPINGV2_CAPTURE") {
+    if (event.data?.type === "CEAIR_SHOPPINGV2_BLOCKED") {
+      chrome.runtime.sendMessage({
+        type: "CEAIR_CAPTURED_BLOCKED",
+        pageUrl: window.location.href,
+        details: event.data.payload || {}
+      });
+    }
     return;
   }
 
