@@ -27,16 +27,25 @@
 
 ## 调试
 
-- 在东航 H5 航班列表页打开开发者工具
-- 在 `chrome://extensions` 中查看 service worker 日志
+- 不要把“打开 DevTools 后刷新页面”当成默认调试方式
+- 当前已确认页面存在反调试机制，DevTools 打开后刷新更容易触发验证
+- 更稳妥的方式是直接看扩展选项页里的：
+  - “最近回传结果”
+  - “最近一次调试痕迹”
+- 如需看扩展侧日志，再去 `chrome://extensions` 查看 service worker 日志
 - WSL 服务侧检查：
   - `GET /api/status`
   - `state.last_external_flight_result`
 - 如果扩展选项页里的“最近回传结果”显示 `shoppingv2_non_json`，说明插件已经看到了航班接口，但返回的是滑块/WAF 页面，不是航班 JSON
+- 如果出现 `shoppingv2_empty_flights`，说明插件看到了接口响应，但没有从返回体里直接解出航班数组
+- 当前插件已经新增 DOM 兜底：即使 `shoppingv2` 是密文包装，也会继续尝试从页面最终渲染出来的航班文本里抽取结果
 - 扩展选项页里的“最近一次调试痕迹”会显示当前走到哪一层，例如：
   - `content_bootstrap`
   - `page_hook_injected`
   - `context_parse_failed`
   - `shoppingv2_captured`
+  - `shoppingv2_empty_flights`
+  - `dom_flights_not_found`
+  - `dom_flights_captured`
   - `background_received_flights`
   - `forward_completed`

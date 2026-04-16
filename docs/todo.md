@@ -12,6 +12,10 @@
 
 - 让 `WSL` 服务继续只负责日期级筛选、规则匹配、航班级事件去重和通知
 - 继续在 Windows Chrome 插件里定位“页面最终用于渲染的航班数组”抓取点
+- 验证最新 DOM 兜底逻辑是否能从页面最终渲染结果中稳定抽到：
+  - `flight_no`
+  - `dep_time`
+  - `arr_time`
 - 串完整体链路：日期级命中 -> Windows 真实 Chrome 页面检查 -> 插件回传 -> 服务端按航班级触发通知
 - 验证新的规则模型在真实场景配置中是否稳定，覆盖：
   - `上海 -> 深圳`，周一 `07:30 - 09:30`
@@ -23,6 +27,9 @@
   - `CryptoJS.AES.decrypt`
   - `CryptoJS.enc.Utf8.stringify`
 - 明确记住当前现实限制：页面存在反调试机制，DevTools 打开后刷新更容易触发验证，且在该状态下验证难以通过
+- 观察新增 trace：
+  - `dom_flights_not_found`
+  - `dom_flights_captured`
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`
   - `POST /api/browser-probe`
