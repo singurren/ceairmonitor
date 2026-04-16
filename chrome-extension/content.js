@@ -46,7 +46,8 @@ function onPageMessage(event) {
   if (flights.length === 0) {
     void recordTrace("shoppingv2_empty_flights", {
       pageUrl: window.location.href,
-      context
+      context,
+      payloadSummary: summarizePayload(event.data.payload)
     });
     return;
   }
@@ -132,6 +133,51 @@ function normalizeFlights(payload) {
       flight_key: String(flight.flightKey || "").trim()
     }))
     .filter((flight) => flight.flight_no && flight.dep_time);
+}
+
+function summarizePayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return {
+      kind: typeof payload
+    };
+  }
+
+  const data = payload.data && typeof payload.data === "object" ? payload.data : null;
+  return {
+    topLevelKeys: Object.keys(payload).slice(0, 20),
+    dataKeys: data ? Object.keys(data).slice(0, 30) : [],
+    code: payload.code ?? null,
+    success: payload.success ?? null,
+    message: payload.message ?? payload.msg ?? "",
+    flightListType: Array.isArray(data?.flights) ? "array" : typeof data?.flights,
+    flightListLength: Array.isArray(data?.flights) ? data.flights.length : null,
+    firstDataArrayKey: findFirstArrayKey(data),
+    firstDataArrayLength: firstArrayLength(data)
+  };
+}
+
+function findFirstArrayKey(data) {
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+  for (const [key, value] of Object.entries(data)) {
+    if (Array.isArray(value)) {
+      return key;
+    }
+  }
+  return "";
+}
+
+function firstArrayLength(data) {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  for (const value of Object.values(data)) {
+    if (Array.isArray(value)) {
+      return value.length;
+    }
+  }
+  return null;
 }
 
 async function recordTrace(stage, details) {
