@@ -1,6 +1,16 @@
+(function bootstrapState() {
+  window.__ceairMonitorState = window.__ceairMonitorState || {
+    domObserverStarted: false,
+    domCaptureTimer: 0,
+    lastCaptureSignature: "",
+    lastDomTraceSignature: ""
+  };
+})();
+
 (function bootstrap() {
   void recordTrace("content_bootstrap", { pageUrl: window.location.href });
   injectPageHook();
+  startDomFlightObserver();
   window.addEventListener("message", onPageMessage);
 })();
 
@@ -49,6 +59,7 @@ function onPageMessage(event) {
       context,
       payloadSummary: summarizePayload(event.data.payload)
     });
+    scheduleDomFlightCheck("shoppingv2_empty_flights");
     return;
   }
 
@@ -57,11 +68,7 @@ function onPageMessage(event) {
     context,
     flightCount: flights.length
   });
-  chrome.runtime.sendMessage({
-    type: "CEAIR_CAPTURED_FLIGHTS",
-    ...context,
-    flights
-  });
+  sendCapturedFlights(context, flights, "shoppingv2_payload");
 }
 
 function parseFlightListContext(urlText) {
@@ -232,6 +239,166 @@ function firstArrayLength(data) {
     }
   }
   return null;
+}
+
+function startDomFlightObserver() {
+  if (window.__ceairMonitorState.domObserverStarted) {
+    return;
+  }
+  window.__ceairMonitorState.domObserverStarted = true;
+
+  const kick = () => scheduleDomFlightCheck("dom_observer");
+  if (document.body) {
+    installDomObserver(kick);
+  } else {
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        installDomObserver(kick);
+        kick();
+      },
+      { once: true }
+    );
+  }
+
+  window.addEventListener("load", kick, { once: true });
+  window.setTimeout(() => scheduleDomFlightCheck("bootstrap_1s"), 1000);
+  window.setTimeout(() => scheduleDomFlightCheck("bootstrap_3s"), 3000);
+  window.setTimeout(() => scheduleDomFlightCheck("bootstrap_6s"), 6000);
+}
+
+function installDomObserver(onChange) {
+  if (!document.body || document.body.dataset.ceairMonitorDomObserved === "1") {
+    return;
+  }
+  document.body.dataset.ceairMonitorDomObserved = "1";
+  const observer = new MutationObserver(() => onChange());
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+}
+
+function scheduleDomFlightCheck(reason) {
+  if (window.__ceairMonitorState.domCaptureTimer) {
+    window.clearTimeout(window.__ceairMonitorState.domCaptureTimer);
+  }
+  window.__ceairMonitorState.domCaptureTimer = window.setTimeout(() => {
+    window.__ceairMonitorState.domCaptureTimer = 0;
+    void captureFlightsFromDom(reason);
+  }, 800);
+}
+
+async function captureFlightsFromDom(reason) {
+  const context = parseFlightListContext(window.location.href);
+  if (!context || !document.body) {
+    return;
+  }
+  const flights = scrapeFlightsFromDom(document.body);
+  if (flights.length === 0) {
+    const traceSignature = `${reason}:${document.body.innerText.slice(0, 120)}`;
+    if (window.__ceairMonitorState.lastDomTraceSignature !== traceSignature) {
+      window.__ceairMonitorState.lastDomTraceSignature = traceSignature;
+      await recordTrace("dom_flights_not_found", {
+        pageUrl: window.location.href,
+        context,
+        reason
+      });
+    }
+    return;
+  }
+
+  await recordTrace("dom_flights_captured", {
+    pageUrl: window.location.href,
+    context,
+    reason,
+    flightCount: flights.length
+  });
+  sendCapturedFlights(context, flights, "rendered_dom");
+}
+
+function scrapeFlightsFromDom(root) {
+  const candidates = [];
+  const seenElements = new Set();
+  const elements = root.querySelectorAll("*");
+  for (const element of elements) {
+    if (!(element instanceof HTMLElement) || seenElements.has(element)) {
+      continue;
+    }
+    const text = normalizeElementText(element.innerText || "");
+    if (text.length < 6 || text.length > 220) {
+      continue;
+    }
+    const flightNos = extractFlightNumbers(text);
+    const times = extractTimes(text);
+    if (flightNos.length !== 1 || times.length === 0 || times.length > 4) {
+      continue;
+    }
+    if (element.querySelector("*")) {
+      const childHasSameSignal = Array.from(element.children).some((child) => {
+        if (!(child instanceof HTMLElement)) {
+          return false;
+        }
+        const childText = normalizeElementText(child.innerText || "");
+        return extractFlightNumbers(childText).length > 0 && extractTimes(childText).length > 0;
+      });
+      if (childHasSameSignal) {
+        continue;
+      }
+    }
+    seenElements.add(element);
+    candidates.push({
+      flight_no: flightNos[0],
+      dep_time: times[0] || "",
+      arr_time: times[1] || "",
+      flight_key: ""
+    });
+  }
+
+  const deduped = [];
+  const seenFlights = new Set();
+  for (const flight of candidates) {
+    if (!flight.flight_no || !flight.dep_time) {
+      continue;
+    }
+    const key = `${flight.flight_no}:${flight.dep_time}:${flight.arr_time}`;
+    if (seenFlights.has(key)) {
+      continue;
+    }
+    seenFlights.add(key);
+    deduped.push(flight);
+  }
+  return deduped;
+}
+
+function normalizeElementText(text) {
+  return String(text).replace(/\s+/g, " ").trim();
+}
+
+function extractFlightNumbers(text) {
+  return Array.from(text.matchAll(/\b([A-Z]{2}\d{3,4})\b/g), (match) => match[1]);
+}
+
+function extractTimes(text) {
+  return Array.from(text.matchAll(/\b([01]\d|2[0-3]):[0-5]\d\b/g), (match) => match[0]);
+}
+
+function sendCapturedFlights(context, flights, source) {
+  const signature = `${context.origin}-${context.destination}-${context.date}:${flights
+    .map((flight) => `${flight.flight_no}@${flight.dep_time}`)
+    .sort()
+    .join("|")}`;
+  if (window.__ceairMonitorState.lastCaptureSignature === signature) {
+    return;
+  }
+  window.__ceairMonitorState.lastCaptureSignature = signature;
+  chrome.runtime.sendMessage({
+    type: "CEAIR_CAPTURED_FLIGHTS",
+    captureSource: source,
+    ...context,
+    flights
+  });
 }
 
 async function recordTrace(stage, details) {
