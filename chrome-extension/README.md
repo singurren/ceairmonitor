@@ -56,6 +56,7 @@
 - `background_received_flights` 和 `forward_completed` 里现在会额外带：
   - `captureSource`
   - `captureMeta`
+  - `flights`
 - 如果后台转发接口本身访问失败，还会出现：
   - `forward_failed`
   - `networkError`
@@ -83,3 +84,9 @@
 - 扩展选项里的 endpoint 是否仍是 `http://127.0.0.1:8766/api/flight-result`
 - 这个地址在 Windows Chrome 所在环境里是否真的能访问到 WSL 服务
 - 是否需要改成 Windows 可访问的 WSL IP，例如 `http://172.x.x.x:8766/api/flight-result`
+
+测试阶段更直接的判断标准是：
+
+- 先看插件“最近一次回传结果”里的 `flights`
+- 只要这里已经出现当天全部航班，说明插件抓取主线已经工作
+- `matched_rules / new_event_count / notification` 这些是后续业务联调阶段再看的结果

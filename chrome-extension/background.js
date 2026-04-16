@@ -48,7 +48,8 @@ async function handleCapturedFlights(message) {
     date: message.date,
     flightCount: Array.isArray(message.flights) ? message.flights.length : 0,
     captureSource: message.captureSource || "",
-    captureMeta: message.captureMeta || {}
+    captureMeta: message.captureMeta || {},
+    flights: Array.isArray(message.flights) ? message.flights : []
   });
   const settings = await chrome.storage.local.get(["enabled", "endpoint"]);
   if (settings.enabled === false) {
@@ -91,7 +92,8 @@ async function handleCapturedFlights(message) {
       route: `${message.origin}-${message.destination}`,
       date: message.date,
       captureSource: message.captureSource || "",
-      captureMeta: message.captureMeta || {}
+      captureMeta: message.captureMeta || {},
+      flights: Array.isArray(message.flights) ? message.flights : []
     };
     await chrome.storage.local.set({ lastResult: result });
     await setTrace("forward_completed", result);
@@ -107,7 +109,8 @@ async function handleCapturedFlights(message) {
       route: `${message.origin}-${message.destination}`,
       date: message.date,
       captureSource: message.captureSource || "",
-      captureMeta: message.captureMeta || {}
+      captureMeta: message.captureMeta || {},
+      flights: Array.isArray(message.flights) ? message.flights : []
     };
     await chrome.storage.local.set({ lastResult: result });
     await setTrace("forward_failed", result);

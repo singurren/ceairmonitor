@@ -44,6 +44,10 @@
   - `matched_rules`
   - `new_event_count`
   - `notification`
+- 测试阶段先优先验证插件“最近一次回传结果”里的：
+  - `flights`
+  - `flightCount`
+  - `captureSource`
 - 确认 duplicate 去重现在只在“后台已成功确认”后生效，而不是在发送前就锁死
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`
