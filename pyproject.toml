@@ -12,7 +12,7 @@ browser = [
 ]
 
 [project.scripts]
-ceair-monitor = "main:main"
+ceair-monitor = "ceair.monitor:main"
 ceair-save-state = "ceair.browser:main_save_storage_state"
 
 [build-system]
