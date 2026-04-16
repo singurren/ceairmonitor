@@ -43,23 +43,56 @@ function onPageMessage(event) {
 function parseFlightListContext(urlText) {
   try {
     const url = new URL(urlText);
-    const encoded = url.searchParams.get("newParam");
-    if (!encoded) {
-      return null;
+    const newParam = url.searchParams.get("newParam");
+    if (newParam) {
+      return parseMFlightListContext(newParam);
     }
-    const payload = JSON.parse(decodeURIComponent(encoded));
-    const flightDate = String(payload.flightDate || "");
-    if (!payload.depCode || !payload.arrCode || flightDate.length !== 8) {
-      return null;
+
+    const encodedObj = url.searchParams.get("obj");
+    if (encodedObj) {
+      return parseExchangeContext(encodedObj);
     }
-    return {
-      origin: String(payload.depCode).toUpperCase(),
-      destination: String(payload.arrCode).toUpperCase(),
-      date: `${flightDate.slice(0, 4)}-${flightDate.slice(4, 6)}-${flightDate.slice(6, 8)}`
-    };
+
+    return null;
   } catch {
     return null;
   }
+}
+
+function parseMFlightListContext(encoded) {
+  const payload = JSON.parse(decodeURIComponent(encoded));
+  const flightDate = String(payload.flightDate || "");
+  if (!payload.depCode || !payload.arrCode || flightDate.length !== 8) {
+    return null;
+  }
+  return {
+    origin: String(payload.depCode).toUpperCase(),
+    destination: String(payload.arrCode).toUpperCase(),
+    date: `${flightDate.slice(0, 4)}-${flightDate.slice(4, 6)}-${flightDate.slice(6, 8)}`
+  };
+}
+
+function parseExchangeContext(encodedObj) {
+  const payload = JSON.parse(decodeBase64Json(encodedObj));
+  const flightDate = String(payload.depDate || "");
+  const origin = String(payload.oriCityCode || payload.depCityCode || "").toUpperCase();
+  const destination = String(payload.desCityCode || payload.depCode || "").toUpperCase();
+  if (!origin || !destination || !/^\d{4}-\d{2}-\d{2}$/.test(flightDate)) {
+    return null;
+  }
+  return {
+    origin,
+    destination,
+    date: flightDate
+  };
+}
+
+function decodeBase64Json(input) {
+  const normalized = String(input).replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function normalizeFlights(payload) {

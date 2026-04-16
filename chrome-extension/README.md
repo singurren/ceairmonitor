@@ -7,6 +7,9 @@
 - 监听页面里的 `shoppingv2` 请求响应
 - 提取航班列表
 - 回传到本机 WSL 服务：`POST http://127.0.0.1:8766/api/flight-result`
+- 同时支持两种页面入口：
+  - `https://m.ceair.com/mapp/reserve/flightList?newParam=...`
+  - `https://ecactivity.ceair.com/qysz-coupon/exchange.html?obj=...`
 
 ## 安装
 

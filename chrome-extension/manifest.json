@@ -9,7 +9,8 @@
   "host_permissions": [
     "http://127.0.0.1:8766/*",
     "http://localhost:8766/*",
-    "https://m.ceair.com/*"
+    "https://m.ceair.com/*",
+    "https://ecactivity.ceair.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,7 +18,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://m.ceair.com/*"
+        "https://m.ceair.com/*",
+        "https://ecactivity.ceair.com/*"
       ],
       "js": [
         "content.js"
@@ -32,7 +34,8 @@
         "page-hook.js"
       ],
       "matches": [
-        "https://m.ceair.com/*"
+        "https://m.ceair.com/*",
+        "https://ecactivity.ceair.com/*"
       ]
     }
   ]
