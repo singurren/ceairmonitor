@@ -1,0 +1,11 @@
+__pycache__/
+.codex
+.codex/
+*.pyc
+*.pyo
+.venv/
+ceair.egg-info/
+data/playwright-user-data/
+data/chrome-net-export-log.json
+data/state.json
+data/playwright-storage-state.json

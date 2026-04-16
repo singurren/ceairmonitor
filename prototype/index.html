@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>东航趣游卡监控器原型</title>
+    <style>
+      :root {
+        --bg: #f4efe5;
+        --panel: rgba(255, 251, 245, 0.88);
+        --panel-strong: #fffaf2;
+        --ink: #132238;
+        --subtle: #576171;
+        --accent: #006d77;
+        --accent-soft: #d7f0ec;
+        --warn: #c2410c;
+        --warn-soft: #ffedd5;
+        --ok: #166534;
+        --ok-soft: #dcfce7;
+        --line: rgba(19, 34, 56, 0.12);
+        --shadow: 0 20px 50px rgba(35, 44, 74, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(0, 109, 119, 0.12), transparent 25%),
+          radial-gradient(circle at top right, rgba(194, 65, 12, 0.1), transparent 22%),
+          linear-gradient(180deg, #f8f3ea 0%, #f0e8db 100%);
+      }
+
+      .shell {
+        width: min(1200px, calc(100vw - 32px));
+        margin: 24px auto 40px;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        padding: 28px;
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 20px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      h1 {
+        margin: 16px 0 10px;
+        font-size: clamp(32px, 5vw, 54px);
+        line-height: 1;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 52ch;
+        color: var(--subtle);
+        font-size: 16px;
+        line-height: 1.65;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .stat {
+        padding: 16px;
+        border-radius: 18px;
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+      }
+
+      .stat .label {
+        color: var(--subtle);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .stat .value {
+        margin-top: 8px;
+        font-size: 28px;
+        font-weight: 800;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 370px minmax(0, 1fr);
+        gap: 20px;
+        margin-top: 20px;
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      h2 {
+        margin: 0 0 16px;
+        font-size: 18px;
+      }
+
+      .section-note {
+        margin: -8px 0 16px;
+        color: var(--subtle);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .field {
+        margin-bottom: 14px;
+      }
+
+      .field label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .field input,
+      .field select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+        color: var(--ink);
+        padding: 12px 14px;
+        font-size: 14px;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+
+      .chip.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      button {
+        border: none;
+        border-radius: 14px;
+        padding: 12px 16px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .secondary {
+        background: #fff;
+        color: var(--ink);
+        border: 1px solid var(--line);
+      }
+
+      .mode-switch {
+        display: inline-flex;
+        gap: 8px;
+        padding: 5px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+      }
+
+      .mode-switch button {
+        padding: 8px 14px;
+        border-radius: 999px;
+      }
+
+      .mode-switch .selected {
+        background: var(--ink);
+        color: #fff;
+      }
+
+      .table {
+        display: grid;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1.1fr 1.2fr 0.7fr 0.7fr 1fr;
+        gap: 10px;
+        align-items: center;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: var(--panel-strong);
+        border: 1px solid var(--line);
+      }
+
+      .row.header {
+        background: transparent;
+        border: none;
+        padding: 0 6px 8px;
+        color: var(--subtle);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .flight {
+        font-weight: 800;
+      }
+
+      .muted {
+        color: var(--subtle);
+        font-size: 13px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 72px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .badge.ok {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+
+      .badge.warn {
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+
+      .timeline {
+        display: grid;
+        gap: 12px;
+      }
+
+      .event {
+        padding: 14px 16px;
+        border-left: 4px solid var(--accent);
+        border-radius: 0 16px 16px 0;
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .event strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .event time {
+        color: var(--subtle);
+        font-size: 12px;
+      }
+
+      .mini-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .mini-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .hint {
+        margin-top: 16px;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(0, 109, 119, 0.08);
+        color: var(--subtle);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 960px) {
+        .hero,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .row {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .row.header {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <section class="hero">
+        <div>
+          <div class="eyebrow">MVP Prototype · Mock Connector</div>
+          <h1>东航趣游卡监控器</h1>
+          <p>
+            这个原型聚焦一个具体目标：监控东航趣游神州全国版里，上海出发到深圳、起飞日为周日或周一的可兑换航班，并在状态从不可兑变为可兑时立即提醒。
+          </p>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="label">规则状态</div>
+            <div class="value" id="ruleStatus">运行中</div>
+          </div>
+          <div class="stat">
+            <div class="label">轮询间隔</div>
+            <div class="value" id="pollingValue">5 分钟</div>
+          </div>
+          <div class="stat">
+            <div class="label">候选航班</div>
+            <div class="value" id="matchCount">3</div>
+          </div>
+          <div class="stat">
+            <div class="label">新释放事件</div>
+            <div class="value" id="eventCount">2</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <aside class="panel">
+          <h2>监控规则</h2>
+          <p class="section-note">
+            这部分定义“什么航班算我要的”。当前原型只演示规则配置和命中逻辑，不假装已经接通东航 App 实时数据。
+          </p>
+
+          <div class="field">
+            <label for="ruleName">规则名称</label>
+            <input id="ruleName" value="上海 -> 深圳 周日/周一晚班" />
+          </div>
+
+          <div class="field">
+            <label for="origin">出发机场</label>
+            <input id="origin" value="SHA, PVG" />
+          </div>
+
+          <div class="field">
+            <label for="destination">到达机场</label>
+            <input id="destination" value="SZX" />
+          </div>
+
+          <div class="field">
+            <label>起飞星期</label>
+            <div class="chips">
+              <div class="chip">周六</div>
+              <div class="chip active">周日</div>
+              <div class="chip active">周一</div>
+              <div class="chip">周二</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="timeWindow">起飞时间窗口</label>
+            <input id="timeWindow" value="18:00 - 23:30" />
+          </div>
+
+          <div class="field">
+            <label for="minSeats">最低余位</label>
+            <select id="minSeats">
+              <option value="1" selected>至少 1 个可兑换名额</option>
+              <option value="2">至少 2 个可兑换名额</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="channel">通知渠道</label>
+            <select id="channel">
+              <option selected>站内提醒</option>
+              <option>邮件</option>
+              <option>飞书机器人</option>
+              <option>Telegram</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>数据源模式</label>
+            <div class="mode-switch">
+              <button class="selected" data-mode="before">放票前快照</button>
+              <button data-mode="after">放票后快照</button>
+            </div>
+          </div>
+
+          <div class="button-row">
+            <button class="primary" id="simulateBtn">模拟一次轮询</button>
+            <button class="secondary" id="resetBtn">重置事件</button>
+          </div>
+
+          <div class="hint">
+            真实实现建议优先走“App 抓包 -> 接口归一化 -> 规则匹配 -> 事件检测 -> 消息通知”链路。若接口签名过重，再考虑 UI 自动化。
+          </div>
+        </aside>
+
+        <main>
+          <section class="panel">
+            <h2>候选航班快照</h2>
+            <p class="section-note">
+              只展示命中规则的航班。原型中可以切换“放票前 / 放票后”来验证告警逻辑是否符合直觉。
+            </p>
+            <div class="table" id="flightTable"></div>
+          </section>
+
+          <section class="panel" style="margin-top: 20px">
+            <h2>释放事件时间线</h2>
+            <p class="section-note">
+              当航班从不可兑变为可兑，或可兑换余位从 0 变成大于 0 时，生成一条新事件。
+            </p>
+            <div class="timeline" id="timeline"></div>
+          </section>
+
+          <section class="panel" style="margin-top: 20px">
+            <h2>实现路线</h2>
+            <div class="mini-list">
+              <div class="mini-item">
+                <div>
+                  <strong>Phase 1</strong>
+                  <div class="muted">Mock 快照、规则模型、事件去重</div>
+                </div>
+                <span class="badge ok">当前</span>
+              </div>
+              <div class="mini-item">
+                <div>
+                  <strong>Phase 2</strong>
+                  <div class="muted">App 抓包、字段归一化、真实监控</div>
+                </div>
+                <span class="badge warn">待验证</span>
+              </div>
+              <div class="mini-item">
+                <div>
+                  <strong>Phase 3</strong>
+                  <div class="muted">通知渠道、持久化、多规则并发</div>
+                </div>
+                <span class="badge warn">后续</span>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      const snapshots = {
+        before: [
+          {
+            flightNo: "MU5375",
+            route: "SHA -> SZX",
+            departure: "周日 20:10",
+            redeemable: false,
+            seats: 0,
+            tax: "¥50",
+          },
+          {
+            flightNo: "MU5331",
+            route: "PVG -> SZX",
+            departure: "周一 18:45",
+            redeemable: false,
+            seats: 0,
+            tax: "¥50",
+          },
+          {
+            flightNo: "MU5359",
+            route: "SHA -> SZX",
+            departure: "周一 21:35",
+            redeemable: true,
+            seats: 1,
+            tax: "¥50",
+          },
+        ],
+        after: [
+          {
+            flightNo: "MU5375",
+            route: "SHA -> SZX",
+            departure: "周日 20:10",
+            redeemable: true,
+            seats: 2,
+            tax: "¥50",
+          },
+          {
+            flightNo: "MU5331",
+            route: "PVG -> SZX",
+            departure: "周一 18:45",
+            redeemable: true,
+            seats: 1,
+            tax: "¥50",
+          },
+          {
+            flightNo: "MU5359",
+            route: "SHA -> SZX",
+            departure: "周一 21:35",
+            redeemable: true,
+            seats: 1,
+            tax: "¥50",
+          },
+        ],
+      };
+
+      let currentMode = "before";
+      let events = [];
+      let lastSnapshot = structuredClone(snapshots.before);
+
+      const flightTable = document.getElementById("flightTable");
+      const timeline = document.getElementById("timeline");
+      const matchCount = document.getElementById("matchCount");
+      const eventCount = document.getElementById("eventCount");
+
+      function renderFlights(data) {
+        flightTable.innerHTML = `
+          <div class="row header">
+            <div>航班</div>
+            <div>出发</div>
+            <div>可兑状态</div>
+            <div>余位</div>
+            <div>税费</div>
+          </div>
+        `;
+
+        data.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          row.innerHTML = `
+            <div>
+              <div class="flight">${item.flightNo}</div>
+              <div class="muted">${item.route}</div>
+            </div>
+            <div>${item.departure}</div>
+            <div>
+              <span class="badge ${item.redeemable ? "ok" : "warn"}">
+                ${item.redeemable ? "可兑换" : "未释放"}
+              </span>
+            </div>
+            <div>${item.seats}</div>
+            <div>${item.tax}</div>
+          `;
+          flightTable.appendChild(row);
+        });
+
+        matchCount.textContent = String(data.length);
+      }
+
+      function renderEvents() {
+        timeline.innerHTML = "";
+        if (events.length === 0) {
+          timeline.innerHTML = `<div class="event"><strong>暂无新事件</strong><span class="muted">切换到“放票后快照”并点击“模拟一次轮询”可看到告警效果。</span></div>`;
+        } else {
+          events
+            .slice()
+            .reverse()
+            .forEach((item) => {
+              const card = document.createElement("div");
+              card.className = "event";
+              card.innerHTML = `
+                <strong>${item.flightNo} 已释放可兑换座位</strong>
+                <div>${item.message}</div>
+                <time>${item.time}</time>
+              `;
+              timeline.appendChild(card);
+            });
+        }
+
+        eventCount.textContent = String(events.length);
+      }
+
+      function compareSnapshots(previous, next) {
+        const previousMap = new Map(previous.map((item) => [item.flightNo, item]));
+        const now = new Date().toLocaleString("zh-CN", { hour12: false });
+
+        next.forEach((item) => {
+          const oldItem = previousMap.get(item.flightNo);
+          if (!oldItem) {
+            if (item.redeemable || item.seats > 0) {
+              events.push({
+                flightNo: item.flightNo,
+                message: `${item.route} ${item.departure} 首次出现在快照中，当前余位 ${item.seats}`,
+                time: now,
+              });
+            }
+            return;
+          }
+
+          const released = !oldItem.redeemable && item.redeemable;
+          const seatOpened = oldItem.seats === 0 && item.seats > 0;
+          if (released || seatOpened) {
+            events.push({
+              flightNo: item.flightNo,
+              message: `${item.route} ${item.departure} 从不可兑变为可兑，当前余位 ${item.seats}`,
+              time: now,
+            });
+          }
+        });
+      }
+
+      function applyMode(mode) {
+        currentMode = mode;
+        document.querySelectorAll("[data-mode]").forEach((button) => {
+          button.classList.toggle("selected", button.dataset.mode === mode);
+        });
+        renderFlights(snapshots[mode]);
+      }
+
+      document.querySelectorAll("[data-mode]").forEach((button) => {
+        button.addEventListener("click", () => applyMode(button.dataset.mode));
+      });
+
+      document.getElementById("simulateBtn").addEventListener("click", () => {
+        const nextSnapshot = structuredClone(snapshots[currentMode]);
+        compareSnapshots(lastSnapshot, nextSnapshot);
+        lastSnapshot = nextSnapshot;
+        renderFlights(nextSnapshot);
+        renderEvents();
+      });
+
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        events = [];
+        lastSnapshot = structuredClone(snapshots.before);
+        applyMode("before");
+        renderEvents();
+      });
+
+      applyMode("before");
+      renderEvents();
+    </script>
+  </body>
+</html>
