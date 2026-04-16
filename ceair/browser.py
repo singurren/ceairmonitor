@@ -9,14 +9,25 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from playwright.sync_api import sync_playwright
+except ModuleNotFoundError as exc:
+    if exc.name != "playwright":
+        raise
+    PlaywrightTimeoutError = RuntimeError  # type: ignore[assignment]
+    sync_playwright = None
 
 CITY_LABELS = {
     "SHA": "上海",
     "PVG": "上海",
     "SZX": "深圳",
 }
+
+
+def ensure_playwright_available() -> None:
+    if sync_playwright is None:
+        raise RuntimeError("playwright is not installed; install optional browser support to use ceair.browser")
 
 
 def build_flight_list_url(
@@ -77,6 +88,7 @@ class PlaywrightFlightProbe:
         product_code: str,
         route_type: str = "OW",
     ) -> dict[str, Any]:
+        ensure_playwright_available()
         url = build_flight_list_url(origin_code, destination_code, dep_date, product_code, route_type)
         report: dict[str, Any] = {
             "target_url": url,
@@ -293,6 +305,7 @@ def save_storage_state(
     has_touch: bool,
     device_scale_factor: float,
 ) -> dict[str, Any]:
+    ensure_playwright_available()
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -336,6 +349,7 @@ def save_storage_state(
 
 
 def main_save_storage_state() -> None:
+    ensure_playwright_available()
     parser = ArgumentParser(description="Open a Playwright browser and save storage state after manual verification.")
     parser.add_argument("--output", default="data/playwright-storage-state.json")
     parser.add_argument("--user-agent", default=os.environ.get("CEAIR_BROWSER_UA", ""))

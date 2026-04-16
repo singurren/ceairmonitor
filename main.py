@@ -13,8 +13,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ceair.browser import BrowserProbeConfig, PlaywrightFlightProbe
-
 
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -577,8 +575,17 @@ class MonitorService:
                 "state": asdict(self.state),
             }
 
-    def _browser_probe(self, query: dict[str, Any], config: AppConfig) -> dict[str, Any]:
-        probe = PlaywrightFlightProbe(
+    def _build_browser_probe(self, config: AppConfig) -> Any:
+        try:
+            from ceair.browser import BrowserProbeConfig, PlaywrightFlightProbe
+        except ModuleNotFoundError as exc:
+            if exc.name == "playwright":
+                raise RuntimeError(
+                    "playwright is not installed; install optional browser support before using browser probe"
+                ) from exc
+            raise
+
+        return PlaywrightFlightProbe(
             BrowserProbeConfig(
                 headless=config.playwright_headless,
                 user_agent=config.browser_user_agent,
@@ -595,6 +602,9 @@ class MonitorService:
                 device_scale_factor=config.playwright_device_scale_factor,
             )
         )
+
+    def _browser_probe(self, query: dict[str, Any], config: AppConfig) -> dict[str, Any]:
+        probe = self._build_browser_probe(config)
         return probe.probe(
             dep_date=dt.date.fromisoformat(query["date"]),
             origin_code=query["origin"],
@@ -704,23 +714,7 @@ class MonitorService:
             default_rule.route_type if default_rule else config.route_type
         )
 
-        probe = PlaywrightFlightProbe(
-            BrowserProbeConfig(
-                headless=config.playwright_headless,
-                user_agent=config.browser_user_agent,
-                storage_state_path=config.playwright_storage_state_path,
-                timeout_ms=config.playwright_timeout_ms,
-                user_data_dir=config.playwright_user_data_dir,
-                browser_channel=config.playwright_browser_channel,
-                locale=config.playwright_locale,
-                timezone_id=config.playwright_timezone_id,
-                viewport_width=config.playwright_viewport_width,
-                viewport_height=config.playwright_viewport_height,
-                is_mobile=config.playwright_is_mobile,
-                has_touch=config.playwright_has_touch,
-                device_scale_factor=config.playwright_device_scale_factor,
-            )
-        )
+        probe = self._build_browser_probe(config)
         return probe.probe(
             dep_date=dt.date.fromisoformat(date_text),
             origin_code=origin,

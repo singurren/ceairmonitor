@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "China Eastern fun pass monitor with date-level polling and browser-side flight probing"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
+dependencies = []
+
+[project.optional-dependencies]
+browser = [
     "playwright>=1.58.0",
 ]
 

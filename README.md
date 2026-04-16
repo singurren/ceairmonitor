@@ -31,6 +31,14 @@
 uv run ceair-monitor
 ```
 
+默认 `uv sync` 只安装日期级服务所需依赖，不包含 `playwright`。
+
+如果你后面确实要启用浏览器探针，再安装可选浏览器依赖：
+
+```bash
+uv sync --extra browser
+```
+
 启动后可访问：
 
 - `GET /api/status`
@@ -223,6 +231,12 @@ uv run ceair-save-state --target-url https://m.ceair.com/
 
 ```bash
 uv sync
+```
+
+如果你需要运行 `ceair-save-state` 或 `POST /api/browser-probe`，要改成：
+
+```bash
+uv sync --extra browser
 ```
 
 如果不想依赖 script 入口，也可以直接用模块方式：
