@@ -4,11 +4,12 @@
   "poll_interval_seconds": 300,
   "backoff_step_seconds": 300,
   "max_poll_interval_seconds": 1800,
-  "start_offset_days": 21,
-  "days_ahead": 6,
+  "start_offset_days": 0,
+  "days_ahead": 13,
   "weekdays": [
-    5,
-    1
+    1,
+    4,
+    5
   ],
   "origin_codes": [
     "SHA"
@@ -53,7 +54,7 @@
         1
       ],
       "start_time": "07:30",
-      "end_time": "09:30"
+      "end_time": "09:40"
     },
     {
       "name": "返程 深圳到上海 周四下午",

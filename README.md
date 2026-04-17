@@ -62,7 +62,7 @@ uv sync --extra browser
 - `start_offset_days`
   从今天起偏移几天开始查，默认 `0`
 - `days_ahead`
-  向后查多少天，默认 `14`
+  向后查多少天。当前正式配置为 `13`，配合包含起止日期的计算方式，等价于“包含今天在内总共查询 14 天”
 - `weekdays`
   监控哪些星期，使用 `0=周日, 1=周一, ... 6=周六`
 - `origin_codes`
@@ -129,6 +129,15 @@ uv sync --extra browser
   这组参数用于让浏览器上下文更接近移动端 H5 场景，减少与真人设备的环境差异
 - `rules`
   可选。正式的多规则配置；如果为空，服务仍按旧的 `origin_codes + destination_codes + weekdays` 兼容运行
+- 持久化去重状态
+  服务会把已推送过的日期级状态和航班级事件落到 `data/state.json`，避免重复推送；这些状态会在每天北京时间 `07:30` 之后首次轮询时自动重置
+
+部署方式说明：
+
+- 这里的服务端和浏览器扩展都是为后台自动运行设计的
+- 我之前在命令行里执行 `curl`、`git`、启动服务，是为了开发和测试，不是正式运行时所必需的人工步骤
+- 你部署到 `NAS` 后，服务本身可以持续后台运行；Windows 侧浏览器扩展也会按已有逻辑自动轮询、自动开页、自动回传、自动推送
+- 正式运行时，你不需要不断手动在命令行里敲代码来接收或发送消息
 
 `rules` 示例：
 
@@ -141,7 +150,7 @@ uv sync --extra browser
       "destination_codes": ["SZX"],
       "weekdays": [1],
       "start_time": "07:30",
-      "end_time": "09:30"
+      "end_time": "09:40"
     },
     {
       "name": "深圳回上海 周四下午",
@@ -162,12 +171,12 @@ uv sync --extra browser
 
 ## HTTP 修改配置示例
 
-把查询窗口改成从今天起查 21 天：
+把查询窗口改成“包含今天在内总共查 14 天”：
 
 ```bash
 curl -X PATCH http://127.0.0.1:8766/api/config \
   -H 'Content-Type: application/json' \
-  -d '{"days_ahead": 21}'
+  -d '{"start_offset_days": 0, "days_ahead": 13}'
 ```
 
 把监控星期改成周日、周一、周五：

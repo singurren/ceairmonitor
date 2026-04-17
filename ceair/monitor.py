@@ -30,6 +30,8 @@ DEFAULT_BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/135.0.0.0 Safari/537.36"
 )
+DAILY_RESET_HOUR = 7
+DAILY_RESET_MINUTE = 30
 CITY_LABELS = {
     "SHA": "上海",
     "PVG": "上海",
@@ -231,8 +233,8 @@ class AppConfig:
     backoff_step_seconds: int = 300
     max_poll_interval_seconds: int = 1800
     start_offset_days: int = 0
-    days_ahead: int = 14
-    weekdays: list[int] = field(default_factory=lambda: [0, 1])
+    days_ahead: int = 13
+    weekdays: list[int] = field(default_factory=lambda: [1, 4, 5])
     origin_codes: list[str] = field(default_factory=lambda: ["SHA"])
     destination_codes: list[str] = field(default_factory=lambda: ["SZX"])
     product_code: str = "YRDCCN0525"
@@ -864,7 +866,8 @@ class MonitorService:
     def _maybe_reset_daily_state(self) -> None:
         now = now_local()
         reset_date = now.date().isoformat()
-        if now.hour < 7:
+        reset_time = dt.time(hour=DAILY_RESET_HOUR, minute=DAILY_RESET_MINUTE, tzinfo=now.tzinfo)
+        if now.timetz() < reset_time:
             return
 
         with self.lock:
