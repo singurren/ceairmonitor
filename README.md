@@ -214,9 +214,43 @@ chmod +x ./scripts/ceair-daemon.sh
 ./scripts/ceair-daemon.sh logs
 ```
 
+如果你希望服务随当前这台 `WSL` 实例启动而启动，可以直接执行：
+
+```bash
+chmod +x ./scripts/install-wsl-boot.sh ./scripts/uninstall-wsl-boot.sh
+./scripts/install-wsl-boot.sh
+```
+
+它会把下面这条 boot command 写进 `/etc/wsl.conf`：
+
+```ini
+[boot]
+command = bash -lc 'cd /home/gurren/project/ceair && ./scripts/ceair-daemon.sh start'
+```
+
+写完后，需要在 Windows 侧执行一次：
+
+```powershell
+wsl.exe --shutdown
+```
+
+这样下次 `WSL` 被拉起时，就会自动执行后台启动脚本。
+
+如果你以后不想让服务随 `WSL` 启动而启动，执行：
+
+```bash
+./scripts/uninstall-wsl-boot.sh
+```
+
+然后同样在 Windows 侧执行一次：
+
+```powershell
+wsl.exe --shutdown
+```
+
 它会：
 
-- 用 `uv run ceair-monitor` 在后台启动服务
+- 优先用 `.venv/bin/ceair-monitor` 在后台启动服务；只有本地虚拟环境不存在时才回退到 `uv run ceair-monitor`
 - 把进程号写到 `.run/ceair-monitor.pid`
 - 把日志写到 `.run/ceair-monitor.log`
 
@@ -232,6 +266,8 @@ wsl.exe -d <你的发行版名> --cd /home/gurren/project/ceairmonitor bash -lc 
 
 - 服务能后台常驻，不代表插件链就一定能工作
 - 航班级补查仍然依赖 `Windows Chrome` 正在运行并且扩展已加载
+- `install-wsl-boot.sh` 解决的是“WSL 实例被拉起后，服务自动起来”
+- 如果你还希望开机后自动拉起整台 `WSL`，仍然要靠 Windows 任务计划程序去调用 `wsl.exe`
 
 从 Chrome DevTools 导入一条成功的 `shoppingv2` cURL，请求头和 Cookie 会自动写入配置：
 

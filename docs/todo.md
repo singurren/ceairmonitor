@@ -32,6 +32,8 @@
   - `./scripts/ceair-daemon.sh start`
   - `.run/ceair-monitor.pid`
   - `.run/ceair-monitor.log`
+- 验证后台脚本优先走 `.venv/bin/ceair-monitor` 后，在当前本机 WSL 里不再受 `uv` cache 权限影响
+- 验证当前机器上的 `install-wsl-boot.sh` / `uninstall-wsl-boot.sh` 是否能稳定写入和移除 `/etc/wsl.conf` 的 boot command
 - 上线前创建本地私有通知密钥文件：
   - `data/secrets.local.json`
   - 仅保留 `serverchan_sendkeys`

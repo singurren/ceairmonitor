@@ -5,7 +5,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/.run"
 PID_FILE="${RUNTIME_DIR}/ceair-monitor.pid"
 LOG_FILE="${RUNTIME_DIR}/ceair-monitor.log"
-CMD=(uv run ceair-monitor)
+if [[ -x "${ROOT_DIR}/.venv/bin/ceair-monitor" ]]; then
+  CMD=("${ROOT_DIR}/.venv/bin/ceair-monitor")
+else
+  CMD=(uv run ceair-monitor)
+fi
+HEALTHCHECK_URL="http://127.0.0.1:8766/api/status"
 
 mkdir -p "${RUNTIME_DIR}"
 
@@ -32,12 +37,17 @@ start_service() {
   local pid=$!
   echo "${pid}" > "${PID_FILE}"
 
-  sleep 1
-  if kill -0 "${pid}" 2>/dev/null; then
-    echo "ceair-monitor started (pid ${pid})"
-    echo "log: ${LOG_FILE}"
-    exit 0
-  fi
+  for _ in {1..30}; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      break
+    fi
+    if curl -fsS "${HEALTHCHECK_URL}" >/dev/null 2>&1; then
+      echo "ceair-monitor started (pid ${pid})"
+      echo "log: ${LOG_FILE}"
+      exit 0
+    fi
+    sleep 1
+  done
 
   echo "failed to start ceair-monitor"
   tail -n 50 "${LOG_FILE}" 2>/dev/null || true

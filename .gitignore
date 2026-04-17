@@ -10,3 +10,4 @@ data/chrome-net-export-log.json
 data/state.json
 data/playwright-storage-state.json
 data/secrets.local.json
+.run/
