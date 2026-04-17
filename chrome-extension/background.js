@@ -43,7 +43,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "CEAIR_CAPTURED_BLOCKED") {
-    void handleBlockedCapture(message)
+    void handleBlockedCapture(message, _sender)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((error) => sendResponse({ ok: false, error: String(error) }));
     return true;
@@ -53,13 +53,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  void handleCapturedFlights(message)
+  void handleCapturedFlights(message, _sender)
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => sendResponse({ ok: false, error: String(error) }));
   return true;
 });
 
-async function handleCapturedFlights(message) {
+async function handleCapturedFlights(message, sender) {
   await setTrace("background_received_flights", {
     route: `${message.origin}-${message.destination}`,
     date: message.date,
@@ -114,6 +114,7 @@ async function handleCapturedFlights(message) {
     };
     await chrome.storage.local.set({ lastResult: result });
     await setTrace("forward_completed", result);
+    await maybeCloseAutoOpenedTab(sender);
     return result;
   } catch (error) {
     const result = {
@@ -140,7 +141,8 @@ async function pollAutoOpenTasks(reason) {
     "enabled",
     "endpoint",
     "autoOpenEnabled",
-    "autoOpenedTaskKeys"
+    "autoOpenedTaskKeys",
+    "autoOpenedTabIds"
   ]);
   if (settings.enabled === false || settings.autoOpenEnabled === false) {
     return;
@@ -158,16 +160,26 @@ async function pollAutoOpenTasks(reason) {
     const body = await response.json();
     const tasks = extractAutoOpenTasks(body);
     const autoOpenedTaskKeys = settings.autoOpenedTaskKeys || {};
+    const lastPollAt = String(body?.state?.last_poll_at || "");
     let openedCount = 0;
 
     for (const task of tasks) {
-      const taskKey = `${task.origin}-${task.destination}:${task.date}`;
+      const taskKey = `${task.origin}-${task.destination}:${task.date}:${lastPollAt}`;
       if (autoOpenedTaskKeys[taskKey]) {
         continue;
       }
       const url = buildFlightListUrl(task.origin, task.destination, task.date, task.productCode, task.routeType);
-      await openOrFocusTab(url);
+      const tabId = await openOrFocusTab(url, taskKey);
       autoOpenedTaskKeys[taskKey] = new Date().toISOString();
+      if (tabId) {
+        const autoOpenedTabIds = (await chrome.storage.local.get(["autoOpenedTabIds"])).autoOpenedTabIds || {};
+        autoOpenedTabIds[String(tabId)] = {
+          taskKey,
+          url,
+          openedAt: new Date().toISOString()
+        };
+        await chrome.storage.local.set({ autoOpenedTabIds });
+      }
       openedCount += 1;
     }
 
@@ -175,6 +187,7 @@ async function pollAutoOpenTasks(reason) {
     await setTrace("auto_open_poll_completed", {
       reason,
       endpoint: statusEndpoint,
+      lastPollAt,
       taskCount: tasks.length,
       openedCount
     });
@@ -249,17 +262,22 @@ function buildFlightListUrl(origin, destination, dateText, productCode, routeTyp
   return `https://m.ceair.com/mapp/reserve/flightList?newParam=${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
-async function openOrFocusTab(url) {
+async function openOrFocusTab(url, taskKey) {
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find((tab) => tab.url === url);
   if (existing?.id) {
-    await chrome.tabs.update(existing.id, { active: true, url });
-    return;
+    await chrome.tabs.remove(existing.id).catch(() => {});
   }
-  await chrome.tabs.create({ url, active: false });
+  const tab = await chrome.tabs.create({ url, active: false });
+  await setTrace("auto_open_tab_created", {
+    url,
+    taskKey,
+    tabId: tab.id || 0
+  });
+  return tab.id || 0;
 }
 
-async function handleBlockedCapture(message) {
+async function handleBlockedCapture(message, sender) {
   const result = {
     ok: false,
     blocked: true,
@@ -272,7 +290,26 @@ async function handleBlockedCapture(message) {
   };
   await chrome.storage.local.set({ lastResult: result });
   await setTrace("blocked_response_seen", result);
+  await maybeCloseAutoOpenedTab(sender);
   return result;
+}
+
+async function maybeCloseAutoOpenedTab(sender) {
+  const tabId = sender?.tab?.id;
+  if (!tabId) {
+    return;
+  }
+  const data = await chrome.storage.local.get(["autoOpenedTabIds"]);
+  const autoOpenedTabIds = data.autoOpenedTabIds || {};
+  if (!autoOpenedTabIds[String(tabId)]) {
+    return;
+  }
+  delete autoOpenedTabIds[String(tabId)];
+  await chrome.storage.local.set({ autoOpenedTabIds });
+  await chrome.tabs.remove(tabId).catch(() => {});
+  await setTrace("auto_open_tab_closed", {
+    tabId
+  });
 }
 
 async function setTrace(stage, details) {
