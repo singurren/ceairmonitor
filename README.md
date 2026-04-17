@@ -193,6 +193,47 @@ curl -X PATCH http://127.0.0.1:8766/api/config \
 curl -X POST http://127.0.0.1:8766/api/poll
 ```
 
+## WSL 后台常驻
+
+如果你在 `Windows + WSL` 环境里部署，而 `systemd`/`systemctl` 不稳定或不可用，当前仓库已经提供了一个不依赖 `systemd` 的后台脚本：
+
+- [scripts/ceair-daemon.sh](/home/gurren/project/ceair/scripts/ceair-daemon.sh)
+
+先给它执行权限：
+
+```bash
+chmod +x ./scripts/ceair-daemon.sh
+```
+
+常用命令：
+
+```bash
+./scripts/ceair-daemon.sh start
+./scripts/ceair-daemon.sh stop
+./scripts/ceair-daemon.sh restart
+./scripts/ceair-daemon.sh status
+./scripts/ceair-daemon.sh logs
+```
+
+它会：
+
+- 用 `uv run ceair-monitor` 在后台启动服务
+- 把进程号写到 `.run/ceair-monitor.pid`
+- 把日志写到 `.run/ceair-monitor.log`
+
+如果你想让它随 `Windows` 启动，可以在“任务计划程序”里创建一个开机或登录后任务，执行：
+
+```powershell
+wsl.exe -d <你的发行版名> --cd /home/gurren/project/ceairmonitor bash -lc './scripts/ceair-daemon.sh start'
+```
+
+例如你的目标路径是 `/home/gurren/project/ceairmonitor`，那就把上面的路径保持不变即可。
+
+注意：
+
+- 服务能后台常驻，不代表插件链就一定能工作
+- 航班级补查仍然依赖 `Windows Chrome` 正在运行并且扩展已加载
+
 从 Chrome DevTools 导入一条成功的 `shoppingv2` cURL，请求头和 Cookie 会自动写入配置：
 
 ```bash

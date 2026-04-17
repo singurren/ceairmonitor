@@ -27,6 +27,11 @@
   - 包含今天在内总共 `14` 天
   - 因为代码按起止都包含计算，所以配置应为 `start_offset_days = 0`、`days_ahead = 13`
 - 确认每日去重状态重置时点为北京时间 `07:30`
+- 验证新的 WSL 常驻脚本是否符合 NAS 目标路径：
+  - `/home/gurren/project/ceairmonitor`
+  - `./scripts/ceair-daemon.sh start`
+  - `.run/ceair-monitor.pid`
+  - `.run/ceair-monitor.log`
 - 记录并避免重复以下已验证但未跑通的插件探索：
   - `JSON.parse`
   - `TextDecoder.decode`
