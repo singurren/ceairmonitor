@@ -3,6 +3,7 @@ const DEFAULT_SETTINGS = {
   endpoint: "http://127.0.0.1:8766/api/flight-result",
   autoOpenEnabled: true
 };
+const HOURLY_CLEANUP_PREFIX = "https://ecactivity.ceair.com/";
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(["enabled", "endpoint", "autoOpenEnabled"]);
@@ -20,6 +21,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     await chrome.storage.local.set(next);
   }
   chrome.alarms.create("ceair-auto-open", { periodInMinutes: 1 });
+  chrome.alarms.create("ceair-hourly-cleanup", { periodInMinutes: 60 });
   await chrome.storage.local.set({
     lastTrace: {
       stage: "extension_installed",
@@ -31,10 +33,16 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.runtime.onStartup?.addListener(() => {
   chrome.alarms.create("ceair-auto-open", { periodInMinutes: 1 });
+  chrome.alarms.create("ceair-hourly-cleanup", { periodInMinutes: 60 });
   void pollAutoOpenTasks("startup");
+  void closeHourlyCleanupTabs("startup");
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "ceair-hourly-cleanup") {
+    void closeHourlyCleanupTabs("alarm");
+    return;
+  }
   if (alarm.name !== "ceair-auto-open") {
     return;
   }
@@ -309,6 +317,25 @@ async function maybeCloseAutoOpenedTab(sender) {
   await chrome.tabs.remove(tabId).catch(() => {});
   await setTrace("auto_open_tab_closed", {
     tabId
+  });
+}
+
+async function closeHourlyCleanupTabs(reason) {
+  const tabs = await chrome.tabs.query({});
+  const closableTabs = tabs.filter((tab) => String(tab.url || "").startsWith(HOURLY_CLEANUP_PREFIX));
+  let closedCount = 0;
+  for (const tab of closableTabs) {
+    if (!tab.id) {
+      continue;
+    }
+    await chrome.tabs.remove(tab.id).catch(() => {});
+    closedCount += 1;
+  }
+  await setTrace("hourly_cleanup_completed", {
+    reason,
+    prefix: HOURLY_CLEANUP_PREFIX,
+    scannedCount: tabs.length,
+    closedCount
   });
 }
 

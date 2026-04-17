@@ -55,6 +55,10 @@
 - 验证自动关闭链路：
   - `auto_open_tab_created`
   - `auto_open_tab_closed`
+- 验证每小时兜底清理链路：
+  - `hourly_cleanup_completed`
+  - `closedCount`
+  - 是否能清掉残留的 `https://ecactivity.ceair.com/` 标签页
 - 验证“下一轮服务轮询仍可兑 -> 再次自动开页”是否成立
 - 确认 duplicate 去重现在只在“后台已成功确认”后生效，而不是在发送前就锁死
 - 验证正常业务通知正文已统一为：
