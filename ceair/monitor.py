@@ -18,6 +18,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 ROOT = PACKAGE_ROOT.parent
 DATA_DIR = ROOT / "data"
 CONFIG_PATH = DATA_DIR / "config.json"
+SECRETS_PATH = DATA_DIR / "secrets.local.json"
 STATE_PATH = DATA_DIR / "state.json"
 HOST = "127.0.0.1"
 PORT = 8766
@@ -66,11 +67,23 @@ def route_label(origin: str, destination: str) -> str:
     return f"{city_label(origin)} -> {city_label(destination)}"
 
 
+def load_secret_sendkeys(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    values = data.get("serverchan_sendkeys", [])
+    if not isinstance(values, list):
+        raise ValueError("serverchan_sendkeys in secrets.local.json must be a list")
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
 def normalize_sendkeys(config: "AppConfig") -> list[str]:
     keys: list[str] = []
-    if config.serverchan_sendkey.strip():
-        keys.append(config.serverchan_sendkey.strip())
     for key in config.serverchan_sendkeys:
+        cleaned = key.strip()
+        if cleaned and cleaned not in keys:
+            keys.append(cleaned)
+    for key in config.secret_serverchan_sendkeys:
         cleaned = key.strip()
         if cleaned and cleaned not in keys:
             keys.append(cleaned)
@@ -246,8 +259,8 @@ class AppConfig:
     index_no: str = "1"
     channel_code: str = CHANNEL_CODE
     sales_channel: str = CHANNEL_CODE
-    serverchan_sendkey: str = ""
     serverchan_sendkeys: list[str] = field(default_factory=list)
+    secret_serverchan_sendkeys: list[str] = field(default_factory=list, repr=False)
     notifications_enabled: bool = True
     request_timeout_seconds: int = 20
     flight_level_enabled: bool = False
@@ -275,11 +288,19 @@ class AppConfig:
             config.save(path)
             return config
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls(**data)
+        data.pop("serverchan_sendkey", None)
+        config = cls(**data)
+        config.secret_serverchan_sendkeys = load_secret_sendkeys(SECRETS_PATH)
+        return config
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(self.public_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def public_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data.pop("secret_serverchan_sendkeys", None)
+        return data
 
 
 @dataclass
@@ -556,7 +577,6 @@ class MonitorService:
             "index_no",
             "channel_code",
             "sales_channel",
-            "serverchan_sendkey",
             "serverchan_sendkeys",
             "notifications_enabled",
             "request_timeout_seconds",
@@ -590,12 +610,12 @@ class MonitorService:
             self.config.save(self.config_path)
             self.state.save(self.state_path)
         self.request_poll()
-        return asdict(self.config)
+        return self.config.public_dict()
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             return {
-                "config": asdict(self.config),
+                "config": self.config.public_dict(),
                 "state": asdict(self.state),
             }
 

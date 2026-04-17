@@ -32,6 +32,9 @@
   - `./scripts/ceair-daemon.sh start`
   - `.run/ceair-monitor.pid`
   - `.run/ceair-monitor.log`
+- 上线前创建本地私有通知密钥文件：
+  - `data/secrets.local.json`
+  - 仅保留 `serverchan_sendkeys`
 - 记录并避免重复以下已验证但未跑通的插件探索：
   - `JSON.parse`
   - `TextDecoder.decode`

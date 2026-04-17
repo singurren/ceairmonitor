@@ -71,7 +71,6 @@ uv sync --extra browser
 - `poll_interval_seconds`
 - `backoff_step_seconds`
 - `max_poll_interval_seconds`
-- `serverchan_sendkey`
 - `serverchan_sendkeys`
 - `notifications_enabled`
 - `flight_level_enabled`
@@ -354,17 +353,15 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
 
 当前已经内置 `Server酱` 通知适配器。
 
-你可以配置单个或多个 `SendKey`。
+密钥不再放在主配置 [data/config.json](/home/gurren/project/ceair/data/config.json) 里，而是单独放在本地私有文件：
 
-兼容旧配置：
+- [data/secrets.local.json](/home/gurren/project/ceair/data/secrets.local.json)
 
-```json
-{
-  "serverchan_sendkey": "SCTxxxxxxxxxxxxxxxx"
-}
-```
+仓库里提供了示例文件：
 
-推荐的新配置方式：
+- [data/secrets.example.json](/home/gurren/project/ceair/data/secrets.example.json)
+
+推荐写法：
 
 ```json
 {
@@ -377,14 +374,16 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
 
 说明：
 
-- `serverchan_sendkey`
-  单个接收人，保留兼容
 - `serverchan_sendkeys`
   多个接收人，服务会对每个 key 分别推送
 - `notifications_enabled`
   可选。默认 `true`。设为 `false` 时，服务仍会继续轮询、抓航班、记录状态，但不会实际发送 `Server酱` 通知
-- 如果两者都配置了，会自动去重合并
-- 如果都为空，服务仍然运行，只是不发送推送
+- 主配置里的 `serverchan_sendkeys` 仍可保留为空数组，用于表达“公共配置不含私密 key”
+- 程序启动时会自动合并：
+  - `data/config.json` 里的 `serverchan_sendkeys`
+  - `data/secrets.local.json` 里的 `serverchan_sendkeys`
+- `data/secrets.local.json` 已加入 `.gitignore`，不会被提交
+- 如果最终合并后仍为空，服务仍然运行，只是不发送推送
 
 当前航班级通知正文格式统一为：
 
