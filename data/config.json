@@ -43,7 +43,7 @@
   "playwright_device_scale_factor": 3.0,
   "rules": [
     {
-      "name": "去程 上海到深圳 周一早班",
+      "name": "去程 上海到深圳 周一上午",
       "origin_codes": [
         "SHA"
       ],

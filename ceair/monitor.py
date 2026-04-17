@@ -225,6 +225,10 @@ def flight_event_key(rule_name: str, origin: str, destination: str, date_text: s
     return f"{rule_name}:{origin}-{destination}:{date_text}:{flight_no}:{dep_time}"
 
 
+def flight_warning_key(origin: str, destination: str, date_text: str, reason: str) -> str:
+    return f"{origin}-{destination}:{date_text}:{reason}"
+
+
 @dataclass
 class AppConfig:
     host: str = HOST
@@ -282,6 +286,7 @@ class AppConfig:
 class AppState:
     previous_statuses: dict[str, str] = field(default_factory=dict)
     previous_flight_keys: list[str] = field(default_factory=list)
+    previous_warning_keys: list[str] = field(default_factory=list)
     last_poll_at: str | None = None
     last_error: str | None = None
     effective_poll_interval_seconds: int | None = None
@@ -863,6 +868,53 @@ class MonitorService:
 
         return result
 
+    def submit_external_warning(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            config = self.config
+            notifier = ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds)
+            previous_warning_keys = set(self.state.previous_warning_keys)
+
+        date_text = str(payload.get("date") or "").strip()
+        origin = str(payload.get("origin") or "").strip().upper()
+        destination = str(payload.get("destination") or "").strip().upper()
+        reason = str(payload.get("reason") or "flight_info_missing").strip() or "flight_info_missing"
+        if not date_text or not origin or not destination:
+            raise ValueError("missing date, origin or destination")
+        dt.date.fromisoformat(date_text)
+
+        warning_key = flight_warning_key(origin, destination, date_text, reason)
+        if warning_key in previous_warning_keys:
+            return {
+                "accepted": True,
+                "reason": reason,
+                "date": date_text,
+                "route": f"{origin}-{destination}",
+                "notification": {"sent": False, "reason": "duplicate_warning"},
+            }
+
+        title = "东航趣游卡航班补查异常"
+        body = "\n".join(
+            [
+                f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
+                "可能已经触发风控，请检查确认",
+            ]
+        )
+        notification = self._notify_warning(title, body, notifier, config)
+
+        with self.lock:
+            current_warning_keys = set(self.state.previous_warning_keys)
+            current_warning_keys.add(warning_key)
+            self.state.previous_warning_keys = sorted(current_warning_keys)
+            self.state.save(self.state_path)
+
+        return {
+            "accepted": True,
+            "reason": reason,
+            "date": date_text,
+            "route": f"{origin}-{destination}",
+            "notification": notification,
+        }
+
     def _maybe_reset_daily_state(self) -> None:
         now = now_local()
         reset_date = now.date().isoformat()
@@ -875,6 +927,7 @@ class MonitorService:
                 return
             self.state.previous_statuses = {}
             self.state.previous_flight_keys = []
+            self.state.previous_warning_keys = []
             self.state.events = []
             self.state.last_daily_reset_date = reset_date
             self.state.save(self.state_path)
@@ -1274,6 +1327,17 @@ class MonitorService:
             body = "\n\n".join(sections)
         return notifier.send(title, body)
 
+    def _notify_warning(
+        self,
+        title: str,
+        body: str,
+        notifier: ServerChanNotifier,
+        config: AppConfig,
+    ) -> dict[str, Any]:
+        if not config.notifications_enabled:
+            return {"sent": False, "reason": "notifications_disabled"}
+        return notifier.send(title, body)
+
 
 class ApiHandler(http.server.SimpleHTTPRequestHandler):
     service: MonitorService
@@ -1302,17 +1366,18 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
                 {
                     "message": "Ceair monitor service",
                     "endpoints": [
-                        "GET /api/config",
-                        "PATCH /api/config",
-                        "GET /api/status",
-                        "POST /api/poll",
-                        "POST /api/test-notify",
-                        "POST /api/flight-result",
-                        "POST /api/import-flight-curl",
-                        "POST /api/browser-probe",
-                        "GET /prototype/index.html",
-                        "GET /docs/spec.md",
-                    ],
+                    "GET /api/config",
+                    "PATCH /api/config",
+                    "GET /api/status",
+                    "POST /api/poll",
+                    "POST /api/test-notify",
+                    "POST /api/flight-result",
+                    "POST /api/flight-warning",
+                    "POST /api/import-flight-curl",
+                    "POST /api/browser-probe",
+                    "GET /prototype/index.html",
+                    "GET /docs/spec.md",
+                ],
                 },
             )
             return
@@ -1336,6 +1401,22 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 payload = json.loads(self.rfile.read(length).decode() or "{}")
                 result = self.service.submit_external_flight_result(payload)
+            except json.JSONDecodeError:
+                self._json(400, {"error": "invalid json"})
+                return
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001
+                self._json(500, {"error": str(exc)})
+                return
+            self._json(200, result)
+            return
+        if self.path == "/api/flight-warning":
+            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                payload = json.loads(self.rfile.read(length).decode() or "{}")
+                result = self.service.submit_external_warning(payload)
             except json.JSONDecodeError:
                 self._json(400, {"error": "invalid json"})
                 return

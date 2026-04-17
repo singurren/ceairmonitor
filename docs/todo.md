@@ -56,10 +56,16 @@
 - 验证自动开页链路：
   - `auto_open_poll_completed`
   - `openedCount`
+  - `deferredCount`
   - 自动打开的 `flightList` 页面是否随后产生 `forward_completed`
 - 验证自动关闭链路：
   - `auto_open_tab_created`
   - `auto_open_tab_closed`
+- 验证风控超时告警链路：
+  - `auto_open_timeout_cleanup`
+  - `warnedCount`
+  - 服务端是否收到 `/api/flight-warning`
+  - 是否推送：`可能已经触发风控，请检查确认`
 - 验证每小时兜底清理链路：
   - `hourly_cleanup_completed`
   - `closedCount`

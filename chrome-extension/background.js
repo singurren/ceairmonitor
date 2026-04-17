@@ -4,6 +4,10 @@ const DEFAULT_SETTINGS = {
   autoOpenEnabled: true
 };
 const HOURLY_CLEANUP_PREFIX = "https://ecactivity.ceair.com/";
+const AUTO_OPEN_ALARM_MINUTES = 5;
+const AUTO_OPEN_BATCH_SIZE = 2;
+const AUTO_OPEN_SPACING_MS = 15000;
+const AUTO_OPEN_TIMEOUT_MS = 120000;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(["enabled", "endpoint", "autoOpenEnabled"]);
@@ -20,7 +24,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (Object.keys(next).length > 0) {
     await chrome.storage.local.set(next);
   }
-  chrome.alarms.create("ceair-auto-open", { periodInMinutes: 1 });
+  chrome.alarms.create("ceair-auto-open", { periodInMinutes: AUTO_OPEN_ALARM_MINUTES });
   chrome.alarms.create("ceair-hourly-cleanup", { periodInMinutes: 60 });
   await chrome.storage.local.set({
     lastTrace: {
@@ -32,7 +36,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup?.addListener(() => {
-  chrome.alarms.create("ceair-auto-open", { periodInMinutes: 1 });
+  chrome.alarms.create("ceair-auto-open", { periodInMinutes: AUTO_OPEN_ALARM_MINUTES });
   chrome.alarms.create("ceair-hourly-cleanup", { periodInMinutes: 60 });
   void pollAutoOpenTasks("startup");
   void closeHourlyCleanupTabs("startup");
@@ -166,29 +170,41 @@ async function pollAutoOpenTasks(reason) {
   try {
     const response = await fetch(statusEndpoint);
     const body = await response.json();
+    await closeStaleAutoOpenedTabs(body, statusEndpoint, endpoint);
     const tasks = extractAutoOpenTasks(body);
     const autoOpenedTaskKeys = settings.autoOpenedTaskKeys || {};
     const lastPollAt = String(body?.state?.last_poll_at || "");
     let openedCount = 0;
 
+    const pendingTasks = [];
     for (const task of tasks) {
       const taskKey = `${task.origin}-${task.destination}:${task.date}:${lastPollAt}`;
       if (autoOpenedTaskKeys[taskKey]) {
         continue;
       }
+      pendingTasks.push({ ...task, taskKey });
+    }
+
+    for (const task of pendingTasks.slice(0, AUTO_OPEN_BATCH_SIZE)) {
       const url = buildFlightListUrl(task.origin, task.destination, task.date, task.productCode, task.routeType);
-      const tabId = await openOrFocusTab(url, taskKey);
-      autoOpenedTaskKeys[taskKey] = new Date().toISOString();
+      const tabId = await openOrFocusTab(url, task.taskKey);
+      autoOpenedTaskKeys[task.taskKey] = new Date().toISOString();
       if (tabId) {
         const autoOpenedTabIds = (await chrome.storage.local.get(["autoOpenedTabIds"])).autoOpenedTabIds || {};
         autoOpenedTabIds[String(tabId)] = {
-          taskKey,
+          taskKey: task.taskKey,
+          origin: task.origin,
+          destination: task.destination,
+          date: task.date,
           url,
           openedAt: new Date().toISOString()
         };
         await chrome.storage.local.set({ autoOpenedTabIds });
       }
       openedCount += 1;
+      if (openedCount < AUTO_OPEN_BATCH_SIZE && openedCount < pendingTasks.length) {
+        await sleep(AUTO_OPEN_SPACING_MS);
+      }
     }
 
     await chrome.storage.local.set({ autoOpenedTaskKeys });
@@ -197,7 +213,9 @@ async function pollAutoOpenTasks(reason) {
       endpoint: statusEndpoint,
       lastPollAt,
       taskCount: tasks.length,
-      openedCount
+      openedCount,
+      deferredCount: Math.max(pendingTasks.length - openedCount, 0),
+      batchSize: AUTO_OPEN_BATCH_SIZE
     });
   } catch (error) {
     await setTrace("auto_open_poll_failed", {
@@ -320,6 +338,40 @@ async function maybeCloseAutoOpenedTab(sender) {
   });
 }
 
+async function closeStaleAutoOpenedTabs(statusBody, statusEndpoint, endpoint) {
+  const now = Date.now();
+  const data = await chrome.storage.local.get(["autoOpenedTabIds"]);
+  const autoOpenedTabIds = data.autoOpenedTabIds || {};
+  let closedCount = 0;
+  let warnedCount = 0;
+
+  for (const [tabId, meta] of Object.entries(autoOpenedTabIds)) {
+    const openedAtMs = Date.parse(String(meta?.openedAt || ""));
+    if (!openedAtMs || now - openedAtMs < AUTO_OPEN_TIMEOUT_MS) {
+      continue;
+    }
+    await chrome.tabs.remove(Number(tabId)).catch(() => {});
+    delete autoOpenedTabIds[tabId];
+    closedCount += 1;
+    if (meta?.origin && meta?.destination && meta?.date) {
+      const warned = await reportFlightWarning(endpoint, meta.origin, meta.destination, meta.date, "capture_timeout");
+      if (warned) {
+        warnedCount += 1;
+      }
+    }
+  }
+
+  await chrome.storage.local.set({ autoOpenedTabIds });
+  if (closedCount > 0 || warnedCount > 0) {
+    await setTrace("auto_open_timeout_cleanup", {
+      endpoint: statusEndpoint,
+      timeoutMs: AUTO_OPEN_TIMEOUT_MS,
+      closedCount,
+      warnedCount
+    });
+  }
+}
+
 async function closeHourlyCleanupTabs(reason) {
   const tabs = await chrome.tabs.query({});
   const closableTabs = tabs.filter((tab) => String(tab.url || "").startsWith(HOURLY_CLEANUP_PREFIX));
@@ -337,6 +389,41 @@ async function closeHourlyCleanupTabs(reason) {
     scannedCount: tabs.length,
     closedCount
   });
+}
+
+async function reportFlightWarning(endpoint, origin, destination, date, reason) {
+  const warningEndpoint = deriveWarningEndpoint(endpoint);
+  if (!warningEndpoint) {
+    return false;
+  }
+  try {
+    const response = await fetch(warningEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ origin, destination, date, reason })
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function deriveWarningEndpoint(endpoint) {
+  try {
+    const url = new URL(endpoint);
+    url.pathname = "/api/flight-warning";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function setTrace(stage, details) {
