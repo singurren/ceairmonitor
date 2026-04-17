@@ -67,6 +67,7 @@
   - `auto_open_poll_completed`
   - `openedCount`
   - `deferredCount`
+  - `followupScheduled`
   - 自动打开的 `flightList` 页面是否随后产生 `forward_completed`
 - 验证自动关闭链路：
   - `auto_open_tab_created`

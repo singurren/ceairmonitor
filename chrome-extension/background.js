@@ -4,10 +4,14 @@ const DEFAULT_SETTINGS = {
   autoOpenEnabled: true
 };
 const HOURLY_CLEANUP_PREFIX = "https://ecactivity.ceair.com/";
-const AUTO_OPEN_ALARM_MINUTES = 5;
-const AUTO_OPEN_BATCH_SIZE = 2;
+const AUTO_OPEN_ALARM_MINUTES = 10;
+const AUTO_OPEN_FOLLOWUP_DELAY_MINUTES = 4;
+const AUTO_OPEN_BATCH_SIZE = 3;
 const AUTO_OPEN_SPACING_MS = 15000;
 const AUTO_OPEN_TIMEOUT_MS = 120000;
+const AUTO_OPEN_ALARM_NAME = "ceair-auto-open";
+const AUTO_OPEN_FOLLOWUP_ALARM_NAME = "ceair-auto-open-followup";
+const HOURLY_CLEANUP_ALARM_NAME = "ceair-hourly-cleanup";
 
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(["enabled", "endpoint", "autoOpenEnabled"]);
@@ -24,8 +28,8 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (Object.keys(next).length > 0) {
     await chrome.storage.local.set(next);
   }
-  chrome.alarms.create("ceair-auto-open", { periodInMinutes: AUTO_OPEN_ALARM_MINUTES });
-  chrome.alarms.create("ceair-hourly-cleanup", { periodInMinutes: 60 });
+  chrome.alarms.create(AUTO_OPEN_ALARM_NAME, { periodInMinutes: AUTO_OPEN_ALARM_MINUTES });
+  chrome.alarms.create(HOURLY_CLEANUP_ALARM_NAME, { periodInMinutes: 60 });
   await chrome.storage.local.set({
     lastTrace: {
       stage: "extension_installed",
@@ -36,21 +40,25 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup?.addListener(() => {
-  chrome.alarms.create("ceair-auto-open", { periodInMinutes: AUTO_OPEN_ALARM_MINUTES });
-  chrome.alarms.create("ceair-hourly-cleanup", { periodInMinutes: 60 });
+  chrome.alarms.create(AUTO_OPEN_ALARM_NAME, { periodInMinutes: AUTO_OPEN_ALARM_MINUTES });
+  chrome.alarms.create(HOURLY_CLEANUP_ALARM_NAME, { periodInMinutes: 60 });
   void pollAutoOpenTasks("startup");
   void closeHourlyCleanupTabs("startup");
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "ceair-hourly-cleanup") {
+  if (alarm.name === HOURLY_CLEANUP_ALARM_NAME) {
     void closeHourlyCleanupTabs("alarm");
     return;
   }
-  if (alarm.name !== "ceair-auto-open") {
+  if (alarm.name === AUTO_OPEN_ALARM_NAME) {
+    void pollAutoOpenTasks("alarm");
     return;
   }
-  void pollAutoOpenTasks("alarm");
+  if (alarm.name === AUTO_OPEN_FOLLOWUP_ALARM_NAME) {
+    void pollAutoOpenTasks("followup_alarm");
+    return;
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -208,14 +216,24 @@ async function pollAutoOpenTasks(reason) {
     }
 
     await chrome.storage.local.set({ autoOpenedTaskKeys });
+    const deferredCount = Math.max(pendingTasks.length - openedCount, 0);
+    if (deferredCount > 0) {
+      chrome.alarms.create(AUTO_OPEN_FOLLOWUP_ALARM_NAME, {
+        delayInMinutes: AUTO_OPEN_FOLLOWUP_DELAY_MINUTES
+      });
+    } else {
+      await chrome.alarms.clear(AUTO_OPEN_FOLLOWUP_ALARM_NAME);
+    }
     await setTrace("auto_open_poll_completed", {
       reason,
       endpoint: statusEndpoint,
       lastPollAt,
       taskCount: tasks.length,
       openedCount,
-      deferredCount: Math.max(pendingTasks.length - openedCount, 0),
-      batchSize: AUTO_OPEN_BATCH_SIZE
+      deferredCount,
+      batchSize: AUTO_OPEN_BATCH_SIZE,
+      followupScheduled: deferredCount > 0,
+      followupDelayMinutes: deferredCount > 0 ? AUTO_OPEN_FOLLOWUP_DELAY_MINUTES : 0
     });
   } catch (error) {
     await setTrace("auto_open_poll_failed", {
@@ -264,7 +282,7 @@ function extractAutoOpenTasks(statusBody) {
     seen.add(key);
     tasks.push({ origin, destination, date, productCode, routeType });
   }
-  return tasks;
+  return tasks.sort((left, right) => left.date.localeCompare(right.date));
 }
 
 function buildFlightListUrl(origin, destination, dateText, productCode, routeType) {
