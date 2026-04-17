@@ -73,6 +73,7 @@ uv sync --extra browser
 - `max_poll_interval_seconds`
 - `serverchan_sendkey`
 - `serverchan_sendkeys`
+- `notifications_enabled`
 - `flight_level_enabled`
 - `browser_user_agent`
 - `m_site_cookie`
@@ -330,8 +331,23 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
   单个接收人，保留兼容
 - `serverchan_sendkeys`
   多个接收人，服务会对每个 key 分别推送
+- `notifications_enabled`
+  可选。默认 `true`。设为 `false` 时，服务仍会继续轮询、抓航班、记录状态，但不会实际发送 `Server酱` 通知
 - 如果两者都配置了，会自动去重合并
 - 如果都为空，服务仍然运行，只是不发送推送
+
+当前航班级通知正文格式统一为：
+
+```text
+yyyy-mm-dd 周x ;出发地 -> 目的地
+起飞时间1，航班号1； 起飞时间2，航班号2；...
+```
+
+规则：
+
+- 日期行和航班行之间换行
+- 不同日期之间空一行
+- 同一日期下多个航班之间使用 `；` 分隔
 
 ## 状态持久化
 

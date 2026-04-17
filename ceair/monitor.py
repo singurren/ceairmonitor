@@ -60,6 +60,10 @@ def city_label(code: str) -> str:
     return CITY_LABELS.get(code.upper(), code.upper())
 
 
+def route_label(origin: str, destination: str) -> str:
+    return f"{city_label(origin)} -> {city_label(destination)}"
+
+
 def normalize_sendkeys(config: "AppConfig") -> list[str]:
     keys: list[str] = []
     if config.serverchan_sendkey.strip():
@@ -238,6 +242,7 @@ class AppConfig:
     sales_channel: str = CHANNEL_CODE
     serverchan_sendkey: str = ""
     serverchan_sendkeys: list[str] = field(default_factory=list)
+    notifications_enabled: bool = True
     request_timeout_seconds: int = 20
     flight_level_enabled: bool = False
     browser_user_agent: str = DEFAULT_BROWSER_USER_AGENT
@@ -546,6 +551,7 @@ class MonitorService:
             "sales_channel",
             "serverchan_sendkey",
             "serverchan_sendkeys",
+            "notifications_enabled",
             "request_timeout_seconds",
             "backoff_step_seconds",
             "max_poll_interval_seconds",
@@ -1216,38 +1222,53 @@ class MonitorService:
         notifier: ServerChanNotifier,
         config: AppConfig,
     ) -> dict[str, Any]:
+        if not config.notifications_enabled:
+            return {"sent": False, "reason": "notifications_disabled"}
         if not events:
             return {"sent": False, "reason": "no_new_events"}
 
-        grouped: dict[str, list[str]] = {}
+        flight_groups: dict[tuple[str, str, str], list[tuple[str, str]]] = {}
+        date_groups: dict[tuple[str, str, str], list[str]] = {}
         for event in events:
             if event["type"] == "flight_window_opened":
-                grouped.setdefault("flight_level", []).append(
+                flight_groups.setdefault(
+                    (event["date"], event["origin"], event["destination"]),
+                    [],
+                ).append((event["dep_time"], event["flight_no"]))
+                continue
+            date_groups.setdefault(
+                (event["date"], event["origin"], event["destination"]),
+                [],
+            ).append(event["rule_name"])
+
+        title = "东航趣游卡有可兑换票"
+        if flight_groups:
+            title = "东航趣游卡命中目标航班"
+            sections = []
+            for date_text, origin, destination in sorted(flight_groups):
+                flights = sorted(set(flight_groups[(date_text, origin, destination)]))
+                flight_line = "； ".join(f"{dep_time}，{flight_no}" for dep_time, flight_no in flights)
+                sections.append(
                     "\n".join(
                         [
-                            f"{city_label(event['origin'])} -> {city_label(event['destination'])}",
-                            f"{event['date']} {weekday_label(event['date'])}",
-                            f"起飞时间：{event['dep_time']}",
-                            event["flight_no"],
+                            f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
+                            flight_line,
                         ]
                     )
                 )
-                continue
-            route = f"{city_label(event['origin'])} -> {city_label(event['destination'])}"
-            grouped.setdefault(route, []).append(event["date"])
-
-        lines = []
-        for route, dates in grouped.items():
-            if route == "flight_level":
-                lines.extend(sorted(dates))
-                continue
-            for date_text in sorted(dates):
-                lines.append(f"{route} 可兑换票日期 {date_text}，{weekday_label(date_text)}")
-
-        title = "东航趣游卡有可兑换票"
-        if any(event["type"] == "flight_window_opened" for event in events):
-            title = "东航趣游卡命中目标航班"
-        body = "\n".join(lines)
+            body = "\n\n".join(sections)
+        else:
+            sections = []
+            for date_text, origin, destination in sorted(date_groups):
+                sections.append(
+                    "\n".join(
+                        [
+                            f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
+                            "可兑换",
+                        ]
+                    )
+                )
+            body = "\n\n".join(sections)
         return notifier.send(title, body)
 
 

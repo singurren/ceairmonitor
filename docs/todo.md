@@ -57,6 +57,11 @@
   - `auto_open_tab_closed`
 - 验证“下一轮服务轮询仍可兑 -> 再次自动开页”是否成立
 - 确认 duplicate 去重现在只在“后台已成功确认”后生效，而不是在发送前就锁死
+- 验证正常业务通知正文已统一为：
+  - `yyyy-mm-dd 周x ;出发地 -> 目的地`
+  - 下一行：`起飞时间，航班号； 起飞时间，航班号；...`
+  - 不同日期之间空一行
+- 后续做人工对账测试时，先临时把 `notifications_enabled` 设为 `false`，避免同时收到正常业务通知和测试汇总通知
 - 只在插件路线继续受阻时，再回头验证：
   - `uv run ceair-save-state`
   - `POST /api/browser-probe`
