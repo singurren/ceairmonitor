@@ -355,7 +355,8 @@ class AppConfig:
 @dataclass
 class AppState:
     previous_statuses: dict[str, str] = field(default_factory=dict)
-    previous_flight_keys: list[str] = field(default_factory=list)
+    previous_summary_flight_keys: list[str] = field(default_factory=list)
+    previous_external_flight_keys: list[str] = field(default_factory=list)
     previous_warning_keys: list[str] = field(default_factory=list)
     last_poll_at: str | None = None
     last_successful_poll_at: str | None = None
@@ -376,6 +377,12 @@ class AppState:
             state.save(path)
             return state
         data = json.loads(path.read_text(encoding="utf-8"))
+        legacy_flight_keys = data.pop("previous_flight_keys", None)
+        if legacy_flight_keys is not None:
+            if "previous_summary_flight_keys" not in data:
+                data["previous_summary_flight_keys"] = legacy_flight_keys
+            if "previous_external_flight_keys" not in data:
+                data["previous_external_flight_keys"] = legacy_flight_keys
         return cls(**data)
 
     def save(self, path: Path) -> None:
@@ -954,7 +961,7 @@ class MonitorService:
             )
 
         with self.lock:
-            previous_flight_keys = set(self.state.previous_flight_keys)
+            previous_flight_keys = set(self.state.previous_external_flight_keys)
 
         events: list[dict[str, Any]] = []
         current_flight_keys = set(previous_flight_keys)
@@ -1011,7 +1018,7 @@ class MonitorService:
         )
 
         with self.lock:
-            self.state.previous_flight_keys = sorted(current_flight_keys)
+            self.state.previous_external_flight_keys = sorted(current_flight_keys)
             self.state.last_external_flight_result = result
             self.state.events.extend(events)
             self.state.events = self.state.events[-50:]
@@ -1124,7 +1131,8 @@ class MonitorService:
             if self.state.last_daily_reset_date == reset_date:
                 return
             self.state.previous_statuses = {}
-            self.state.previous_flight_keys = []
+            self.state.previous_summary_flight_keys = []
+            self.state.previous_external_flight_keys = []
             self.state.previous_warning_keys = []
             self.state.warning_tracker = {}
             self.state.events = []
@@ -1448,7 +1456,7 @@ class MonitorService:
     def _detect_events(self, summary: dict[str, Any], config: AppConfig) -> list[dict[str, Any]]:
         with self.lock:
             previous = dict(self.state.previous_statuses)
-            previous_flight_keys = set(self.state.previous_flight_keys)
+            previous_flight_keys = set(self.state.previous_summary_flight_keys)
 
         events: list[dict[str, Any]] = []
         rules_by_name = {rule.name: rule for rule in effective_rules(config)}
@@ -1511,7 +1519,7 @@ class MonitorService:
 
         with self.lock:
             self.state.previous_statuses = current_statuses
-            self.state.previous_flight_keys = sorted(current_flight_keys)
+            self.state.previous_summary_flight_keys = sorted(current_flight_keys)
         return events
 
     def _notify(
