@@ -37,6 +37,9 @@
 - 上线前创建本地私有通知密钥文件：
   - `data/secrets.local.json`
   - 仅保留 `serverchan_sendkeys`
+- 如果需要维护者日报：
+  - 在 `data/secrets.local.json` 里增加 `maintainer_serverchan_sendkeys`
+  - 确认每天 `12:00` 自检推送是否送达
 - 记录并避免重复以下已验证但未跑通的插件探索：
   - `JSON.parse`
   - `TextDecoder.decode`

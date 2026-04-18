@@ -33,6 +33,8 @@ DEFAULT_BROWSER_USER_AGENT = (
 )
 DAILY_RESET_HOUR = 7
 DAILY_RESET_MINUTE = 30
+MAINTENANCE_REPORT_HOUR = 12
+MAINTENANCE_REPORT_MINUTE = 0
 CITY_LABELS = {
     "SHA": "上海",
     "PVG": "上海",
@@ -67,14 +69,22 @@ def route_label(origin: str, destination: str) -> str:
     return f"{city_label(origin)} -> {city_label(destination)}"
 
 
-def load_secret_sendkeys(path: Path) -> list[str]:
+def load_secret_list(path: Path, key: str) -> list[str]:
     if not path.exists():
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
-    values = data.get("serverchan_sendkeys", [])
+    values = data.get(key, [])
     if not isinstance(values, list):
-        raise ValueError("serverchan_sendkeys in secrets.local.json must be a list")
+        raise ValueError(f"{key} in secrets.local.json must be a list")
     return [str(item).strip() for item in values if str(item).strip()]
+
+
+def load_secret_sendkeys(path: Path) -> list[str]:
+    return load_secret_list(path, "serverchan_sendkeys")
+
+
+def load_secret_maintainer_sendkeys(path: Path) -> list[str]:
+    return load_secret_list(path, "maintainer_serverchan_sendkeys")
 
 
 def normalize_sendkeys(config: "AppConfig") -> list[str]:
@@ -261,6 +271,7 @@ class AppConfig:
     sales_channel: str = CHANNEL_CODE
     serverchan_sendkeys: list[str] = field(default_factory=list)
     secret_serverchan_sendkeys: list[str] = field(default_factory=list, repr=False)
+    secret_maintainer_serverchan_sendkeys: list[str] = field(default_factory=list, repr=False)
     notifications_enabled: bool = True
     request_timeout_seconds: int = 20
     flight_level_enabled: bool = False
@@ -291,6 +302,7 @@ class AppConfig:
         data.pop("serverchan_sendkey", None)
         config = cls(**data)
         config.secret_serverchan_sendkeys = load_secret_sendkeys(SECRETS_PATH)
+        config.secret_maintainer_serverchan_sendkeys = load_secret_maintainer_sendkeys(SECRETS_PATH)
         return config
 
     def save(self, path: Path) -> None:
@@ -300,6 +312,7 @@ class AppConfig:
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("secret_serverchan_sendkeys", None)
+        data.pop("secret_maintainer_serverchan_sendkeys", None)
         return data
 
 
@@ -314,6 +327,7 @@ class AppState:
     last_daily_reset_date: str | None = None
     last_summary: dict[str, Any] = field(default_factory=dict)
     last_external_flight_result: dict[str, Any] = field(default_factory=dict)
+    last_maintenance_report_date: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -678,12 +692,21 @@ class MonitorService:
             config = self.config
             client = CeairClient(config)
             notifier = ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds)
+            maintainer_notifier = ServerChanNotifier(
+                [
+                    key.strip()
+                    for key in config.secret_maintainer_serverchan_sendkeys
+                    if key.strip()
+                ],
+                config.request_timeout_seconds,
+            )
 
         try:
             self._maybe_reset_daily_state()
             summary = self._collect_summary(client, config)
             events = self._detect_events(summary, config)
             notification = self._notify(events, notifier, config)
+            maintenance_report = self._maybe_send_maintenance_report(summary, maintainer_notifier)
             with self.lock:
                 self.state.last_poll_at = now_local().isoformat()
                 self.state.last_error = None
@@ -691,6 +714,8 @@ class MonitorService:
                 self.state.events.extend(events)
                 self.state.events = self.state.events[-50:]
                 self.state.last_summary["notification"] = notification
+                if maintenance_report:
+                    self.state.last_summary["maintenance_report"] = maintenance_report
                 self.state.save(self.state_path)
             return summary
         except Exception as exc:  # noqa: BLE001
@@ -1357,6 +1382,45 @@ class MonitorService:
         if not config.notifications_enabled:
             return {"sent": False, "reason": "notifications_disabled"}
         return notifier.send(title, body)
+
+    def _maybe_send_maintenance_report(
+        self,
+        summary: dict[str, Any],
+        notifier: ServerChanNotifier,
+    ) -> dict[str, Any] | None:
+        now = now_local()
+        report_date = now.date().isoformat()
+        report_time = dt.time(hour=MAINTENANCE_REPORT_HOUR, minute=MAINTENANCE_REPORT_MINUTE, tzinfo=now.tzinfo)
+        if now.timetz() < report_time:
+            return None
+
+        with self.lock:
+            if self.state.last_maintenance_report_date == report_date:
+                return None
+            state_snapshot = asdict(self.state)
+
+        title = "东航趣游卡系统自检"
+        redeemable_dates = summary.get("redeemable_dates", [])
+        last_external = state_snapshot.get("last_external_flight_result") or {}
+        body = "\n".join(
+            [
+                f"日期：{report_date} {weekday_label(report_date)}",
+                "本次消息为维护者自检推送",
+                f"最近轮询时间：{state_snapshot.get('last_poll_at') or '无'}",
+                f"最近错误：{state_snapshot.get('last_error') or '无'}",
+                f"当前轮询间隔：{state_snapshot.get('effective_poll_interval_seconds') or 0} 秒",
+                f"当前可兑日期数：{len(redeemable_dates)}",
+                f"最近插件回传：{last_external.get('date') or '无'} {last_external.get('route') or ''}".strip(),
+                f"最近插件回传航班数：{last_external.get('flight_count') or 0}",
+                f"最近风控告警数：{len(state_snapshot.get('previous_warning_keys') or [])}",
+            ]
+        )
+        notification = notifier.send(title, body)
+
+        with self.lock:
+            self.state.last_maintenance_report_date = report_date
+            self.state.save(self.state_path)
+        return notification
 
 
 class ApiHandler(http.server.SimpleHTTPRequestHandler):

@@ -130,6 +130,7 @@ uv sync --extra browser
   可选。正式的多规则配置；如果为空，服务仍按旧的 `origin_codes + destination_codes + weekdays` 兼容运行
 - 持久化去重状态
   服务会把已推送过的日期级状态和航班级事件落到 `data/state.json`，避免重复推送；这些状态会在每天北京时间 `07:30` 之后首次轮询时自动重置
+  同时会记录维护者自检推送是否已在当天发送，避免同一天中午重复发送
 
 部署方式说明：
 
@@ -405,6 +406,9 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
   "serverchan_sendkeys": [
     "SCTxxxxxxxxxxxxxxxx",
     "SCTyyyyyyyyyyyyyyyy"
+  ],
+  "maintainer_serverchan_sendkeys": [
+    "SCTzzzzzzzzzzzzzzzz"
   ]
 }
 ```
@@ -421,6 +425,9 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
   - `data/secrets.local.json` 里的 `serverchan_sendkeys`
 - `data/secrets.local.json` 已加入 `.gitignore`，不会被提交
 - 如果最终合并后仍为空，服务仍然运行，只是不发送推送
+- `maintainer_serverchan_sendkeys`
+  仅用于维护者自检推送，不参与正常业务通知
+- 服务会在每天北京时间 `12:00` 之后首次轮询时，向 `maintainer_serverchan_sendkeys` 发送一条系统自检消息
 
 当前航班级通知正文格式统一为：
 
