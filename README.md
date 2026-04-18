@@ -253,6 +253,7 @@ wsl.exe --shutdown
 - 优先用 `.venv/bin/ceair-monitor` 在后台启动服务；只有本地虚拟环境不存在时才回退到 `uv run ceair-monitor`
 - 把进程号写到 `.run/ceair-monitor.pid`
 - 把日志写到 `.run/ceair-monitor.log`
+- 如果 PID 文件过期，但实际进程还活着，`status/start/stop` 会自动重新对齐 PID 文件
 
 如果你想让它随 `Windows` 启动，可以在“任务计划程序”里创建一个开机或登录后任务，执行：
 

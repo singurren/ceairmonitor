@@ -20,10 +20,41 @@ read_pid() {
   fi
 }
 
-is_running() {
+find_running_pid() {
   local pid
   pid="$(read_pid)"
-  [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+    printf '%s\n' "${pid}"
+    return 0
+  fi
+
+  local candidates=()
+  if command -v pgrep >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] && candidates+=("${line}")
+    done < <(pgrep -f "${ROOT_DIR}/.venv/bin/ceair-monitor" || true)
+    if [[ ${#candidates[@]} -eq 0 ]]; then
+      while IFS= read -r line; do
+        [[ -n "${line}" ]] && candidates+=("${line}")
+      done < <(pgrep -f "uv run ceair-monitor" || true)
+    fi
+  fi
+
+  if [[ ${#candidates[@]} -gt 0 ]]; then
+    printf '%s\n' "${candidates[0]}"
+    return 0
+  fi
+  return 1
+}
+
+is_running() {
+  local pid
+  pid="$(find_running_pid || true)"
+  if [[ -z "${pid}" ]]; then
+    return 1
+  fi
+  echo "${pid}" > "${PID_FILE}"
+  return 0
 }
 
 start_service() {
