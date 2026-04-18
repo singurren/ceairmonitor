@@ -255,6 +255,13 @@ wsl.exe --shutdown
 - 把进程号写到 `.run/ceair-monitor.pid`
 - 把日志写到 `.run/ceair-monitor.log`
 - 如果 PID 文件过期，但实际进程还活着，`status/start/stop` 会自动重新对齐 PID 文件
+- `.run/ceair-monitor.log` 现在会记录轻量运行日志：
+  - 轮询开始 / 结束
+  - 插件航班回传
+  - 业务通知发送结果
+  - 风控告警发送结果
+  - 每日 `07:30` 状态重置
+  - 每日 `12:00` 维护者自检推送
 
 如果你想让它随 `Windows` 启动，可以在“任务计划程序”里创建一个开机或登录后任务，执行：
 

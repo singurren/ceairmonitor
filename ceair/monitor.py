@@ -69,6 +69,18 @@ def route_label(origin: str, destination: str) -> str:
     return f"{city_label(origin)} -> {city_label(destination)}"
 
 
+def log_runtime(event: str, **fields: Any) -> None:
+    payload = {
+        "ts": now_local().isoformat(),
+        "event": event,
+    }
+    for key, value in fields.items():
+        if value is None:
+            continue
+        payload[key] = value
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
 def load_secret_list(path: Path, key: str) -> list[str]:
     if not path.exists():
         return []
@@ -700,6 +712,12 @@ class MonitorService:
                 ],
                 config.request_timeout_seconds,
             )
+        log_runtime(
+            "poll_started",
+            window_start=(now_local().date() + dt.timedelta(days=config.start_offset_days)).isoformat(),
+            window_days=config.days_ahead + 1,
+            poll_interval_seconds=self.state.effective_poll_interval_seconds or config.poll_interval_seconds,
+        )
 
         try:
             self._maybe_reset_daily_state()
@@ -707,6 +725,13 @@ class MonitorService:
             events = self._detect_events(summary, config)
             notification = self._notify(events, notifier, config)
             maintenance_report = self._maybe_send_maintenance_report(summary, maintainer_notifier)
+            log_runtime(
+                "poll_completed",
+                redeemable_dates=len(summary.get("redeemable_dates", [])),
+                new_events=len(events),
+                notification_reason=notification.get("reason"),
+                notification_sent=notification.get("sent"),
+            )
             with self.lock:
                 self.state.last_poll_at = now_local().isoformat()
                 self.state.last_error = None
@@ -720,6 +745,7 @@ class MonitorService:
             return summary
         except Exception as exc:  # noqa: BLE001
             self._handle_poll_error(exc, notifier, config)
+            log_runtime("poll_failed", error=str(exc))
             with self.lock:
                 self.state.last_poll_at = now_local().isoformat()
                 self.state.last_error = str(exc)
@@ -901,6 +927,16 @@ class MonitorService:
             "new_event_count": len(events),
             "notification": notification,
         }
+        log_runtime(
+            "external_flight_result",
+            source=result["source"],
+            route=result["route"],
+            date=result["date"],
+            flight_count=result["flight_count"],
+            new_event_count=result["new_event_count"],
+            notification_reason=notification.get("reason"),
+            notification_sent=notification.get("sent"),
+        )
 
         with self.lock:
             self.state.previous_flight_keys = sorted(current_flight_keys)
@@ -945,6 +981,14 @@ class MonitorService:
             ]
         )
         notification = self._notify_warning(title, body, notifier, config)
+        log_runtime(
+            "external_warning",
+            route=f"{origin}-{destination}",
+            date=date_text,
+            reason=reason,
+            notification_reason=notification.get("reason"),
+            notification_sent=notification.get("sent"),
+        )
 
         with self.lock:
             current_warning_keys = set(self.state.previous_warning_keys)
@@ -976,6 +1020,7 @@ class MonitorService:
             self.state.events = []
             self.state.last_daily_reset_date = reset_date
             self.state.save(self.state_path)
+        log_runtime("daily_state_reset", reset_date=reset_date)
 
     def _is_rate_limited_error(self, exc: Exception) -> bool:
         if isinstance(exc, urllib.error.HTTPError):
@@ -1370,7 +1415,16 @@ class MonitorService:
                     )
                 )
             body = "\n\n".join(sections)
-        return notifier.send(title, body)
+        result = notifier.send(title, body)
+        log_runtime(
+            "business_notification",
+            title=title,
+            event_count=len(events),
+            sent=result.get("sent"),
+            success_count=result.get("success_count"),
+            total_count=result.get("total_count"),
+        )
+        return result
 
     def _notify_warning(
         self,
@@ -1381,7 +1435,15 @@ class MonitorService:
     ) -> dict[str, Any]:
         if not config.notifications_enabled:
             return {"sent": False, "reason": "notifications_disabled"}
-        return notifier.send(title, body)
+        result = notifier.send(title, body)
+        log_runtime(
+            "warning_notification",
+            title=title,
+            sent=result.get("sent"),
+            success_count=result.get("success_count"),
+            total_count=result.get("total_count"),
+        )
+        return result
 
     def _maybe_send_maintenance_report(
         self,
@@ -1416,6 +1478,14 @@ class MonitorService:
             ]
         )
         notification = notifier.send(title, body)
+        log_runtime(
+            "maintenance_report",
+            sent=notification.get("sent"),
+            success_count=notification.get("success_count"),
+            total_count=notification.get("total_count"),
+            redeemable_dates=len(redeemable_dates),
+            recent_warning_count=len(state_snapshot.get("previous_warning_keys") or []),
+        )
 
         with self.lock:
             self.state.last_maintenance_report_date = report_date
