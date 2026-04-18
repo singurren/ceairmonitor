@@ -5,8 +5,8 @@ const DEFAULT_SETTINGS = {
 };
 const HOURLY_CLEANUP_PREFIX = "https://ecactivity.ceair.com/";
 const AUTO_OPEN_ALARM_MINUTES = 10;
-const AUTO_OPEN_FOLLOWUP_DELAY_MINUTES = 4;
-const AUTO_OPEN_BATCH_SIZE = 3;
+const AUTO_OPEN_FOLLOWUP_DELAY_MINUTES = 2;
+const AUTO_OPEN_BATCH_SIZE = 5;
 const AUTO_OPEN_SPACING_MS = 15000;
 const AUTO_OPEN_TIMEOUT_MS = 120000;
 const AUTO_OPEN_ALARM_NAME = "ceair-auto-open";
@@ -257,6 +257,9 @@ function deriveStatusEndpoint(endpoint) {
 }
 
 function extractAutoOpenTasks(statusBody) {
+  if (statusBody?.runtime?.polling_window_active === false) {
+    return [];
+  }
   if (statusBody?.state?.last_error) {
     return [];
   }

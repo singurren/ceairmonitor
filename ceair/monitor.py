@@ -32,9 +32,14 @@ DEFAULT_BROWSER_USER_AGENT = (
     "Chrome/135.0.0.0 Safari/537.36"
 )
 DAILY_RESET_HOUR = 7
-DAILY_RESET_MINUTE = 30
+DAILY_RESET_MINUTE = 0
+ACTIVE_POLL_START_HOUR = 7
+ACTIVE_POLL_START_MINUTE = 0
+ACTIVE_POLL_END_HOUR = 1
+ACTIVE_POLL_END_MINUTE = 0
 MAINTENANCE_REPORT_HOUR = 12
 MAINTENANCE_REPORT_MINUTE = 0
+CONTINUOUS_WARNING_REMINDER_SECONDS = 3600
 CITY_LABELS = {
     "SHA": "上海",
     "PVG": "上海",
@@ -110,6 +115,25 @@ def normalize_sendkeys(config: "AppConfig") -> list[str]:
         if cleaned and cleaned not in keys:
             keys.append(cleaned)
     return keys
+
+
+def normalize_maintainer_sendkeys(config: "AppConfig") -> list[str]:
+    keys: list[str] = []
+    for key in config.secret_maintainer_serverchan_sendkeys:
+        cleaned = key.strip()
+        if cleaned and cleaned not in keys:
+            keys.append(cleaned)
+    return keys
+
+
+def parse_iso_datetime(value: str) -> dt.datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -272,7 +296,7 @@ class AppConfig:
     backoff_step_seconds: int = 300
     max_poll_interval_seconds: int = 1800
     start_offset_days: int = 0
-    days_ahead: int = 13
+    days_ahead: int = 34
     weekdays: list[int] = field(default_factory=lambda: [1, 4, 5])
     origin_codes: list[str] = field(default_factory=lambda: ["SHA"])
     destination_codes: list[str] = field(default_factory=lambda: ["SZX"])
@@ -341,6 +365,8 @@ class AppState:
     last_summary: dict[str, Any] = field(default_factory=dict)
     last_external_flight_result: dict[str, Any] = field(default_factory=dict)
     last_maintenance_report_date: str | None = None
+    warning_tracker: dict[str, dict[str, str]] = field(default_factory=dict)
+    poll_risk_tracker: dict[str, str] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -572,17 +598,22 @@ class MonitorService:
             self.thread.join(timeout=2)
 
     def _run_loop(self) -> None:
-        try:
-            self.poll_once()
-        except Exception:  # noqa: BLE001
-            pass
+        if self._is_within_active_poll_window():
+            try:
+                self.poll_once()
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            log_runtime("poll_skipped_outside_window", next_window_start=self._next_poll_window_start().isoformat())
         while not self.stop_event.is_set():
-            with self.lock:
-                timeout_seconds = self.state.effective_poll_interval_seconds or self.config.poll_interval_seconds
+            timeout_seconds = self._next_wait_seconds()
             self.poll_event.wait(timeout=timeout_seconds)
             self.poll_event.clear()
             if self.stop_event.is_set():
                 break
+            if not self._is_within_active_poll_window():
+                log_runtime("poll_skipped_outside_window", next_window_start=self._next_poll_window_start().isoformat())
+                continue
             try:
                 self.poll_once()
             except Exception:  # noqa: BLE001
@@ -644,7 +675,48 @@ class MonitorService:
             return {
                 "config": self.config.public_dict(),
                 "state": asdict(self.state),
+                "runtime": {
+                    "polling_window_active": self._is_within_active_poll_window(),
+                    "next_poll_window_start": self._next_poll_window_start().isoformat(),
+                },
             }
+
+    def _poll_window_start_today(self, moment: dt.datetime) -> dt.datetime:
+        return moment.replace(
+            hour=ACTIVE_POLL_START_HOUR,
+            minute=ACTIVE_POLL_START_MINUTE,
+            second=0,
+            microsecond=0,
+        )
+
+    def _poll_window_end_today(self, moment: dt.datetime) -> dt.datetime:
+        return moment.replace(
+            hour=ACTIVE_POLL_END_HOUR,
+            minute=ACTIVE_POLL_END_MINUTE,
+            second=0,
+            microsecond=0,
+        )
+
+    def _is_within_active_poll_window(self, moment: dt.datetime | None = None) -> bool:
+        current = moment or now_local()
+        start = self._poll_window_start_today(current)
+        end = self._poll_window_end_today(current)
+        return current >= start or current < end
+
+    def _next_poll_window_start(self, moment: dt.datetime | None = None) -> dt.datetime:
+        current = moment or now_local()
+        start = self._poll_window_start_today(current)
+        if current < start:
+            return start
+        return start + dt.timedelta(days=1)
+
+    def _next_wait_seconds(self) -> float:
+        now = now_local()
+        if not self._is_within_active_poll_window(now):
+            return max((self._next_poll_window_start(now) - now).total_seconds(), 1.0)
+        with self.lock:
+            interval = self.state.effective_poll_interval_seconds or self.config.poll_interval_seconds
+        return max(float(interval), 1.0)
 
     def _build_browser_probe(self, config: AppConfig) -> Any:
         try:
@@ -706,11 +778,7 @@ class MonitorService:
             client = CeairClient(config)
             notifier = ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds)
             maintainer_notifier = ServerChanNotifier(
-                [
-                    key.strip()
-                    for key in config.secret_maintainer_serverchan_sendkeys
-                    if key.strip()
-                ],
+                normalize_maintainer_sendkeys(config),
                 config.request_timeout_seconds,
             )
         log_runtime(
@@ -738,6 +806,7 @@ class MonitorService:
                 self.state.last_poll_at = poll_completed_at
                 self.state.last_successful_poll_at = poll_completed_at
                 self.state.last_error = None
+                self.state.poll_risk_tracker = {}
                 self.state.last_summary = summary
                 self.state.events.extend(events)
                 self.state.events = self.state.events[-50:]
@@ -747,7 +816,7 @@ class MonitorService:
                 self.state.save(self.state_path)
             return summary
         except Exception as exc:  # noqa: BLE001
-            self._handle_poll_error(exc, notifier, config)
+            self._handle_poll_error(exc, maintainer_notifier, config)
             log_runtime("poll_failed", error=str(exc))
             with self.lock:
                 self.state.last_poll_at = now_local().isoformat()
@@ -955,8 +1024,10 @@ class MonitorService:
     def submit_external_warning(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             config = self.config
-            notifier = ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds)
+            notifier = ServerChanNotifier(normalize_maintainer_sendkeys(config), config.request_timeout_seconds)
             previous_warning_keys = set(self.state.previous_warning_keys)
+            current_interval = self.state.effective_poll_interval_seconds or config.poll_interval_seconds
+            tracker = dict(self.state.warning_tracker)
 
         date_text = str(payload.get("date") or "").strip()
         origin = str(payload.get("origin") or "").strip().upper()
@@ -967,7 +1038,29 @@ class MonitorService:
         dt.date.fromisoformat(date_text)
 
         warning_key = flight_warning_key(origin, destination, date_text, reason)
-        if warning_key in previous_warning_keys:
+        now = now_local()
+        warning_meta = dict(tracker.get(warning_key) or {})
+        last_seen_at = parse_iso_datetime(str(warning_meta.get("last_seen_at") or ""))
+        if last_seen_at and (now - last_seen_at).total_seconds() > CONTINUOUS_WARNING_REMINDER_SECONDS:
+            warning_meta = {}
+        first_seen_at = parse_iso_datetime(str(warning_meta.get("first_seen_at") or "")) or now
+        last_escalated_at = parse_iso_datetime(str(warning_meta.get("last_escalated_at") or ""))
+        warning_meta["first_seen_at"] = first_seen_at.isoformat()
+        warning_meta["last_seen_at"] = now.isoformat()
+        should_send_initial = warning_key not in previous_warning_keys
+        should_send_escalation = (
+            not should_send_initial
+            and (now - first_seen_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
+            and (
+                last_escalated_at is None
+                or (now - last_escalated_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
+            )
+        )
+
+        if not should_send_initial and not should_send_escalation:
+            with self.lock:
+                self.state.warning_tracker[warning_key] = warning_meta
+                self.state.save(self.state_path)
             return {
                 "accepted": True,
                 "reason": reason,
@@ -977,12 +1070,24 @@ class MonitorService:
             }
 
         title = "东航趣游卡航班补查异常"
-        body = "\n".join(
-            [
-                f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
-                "可能已经触发风控，请检查确认",
-            ]
-        )
+        if should_send_escalation:
+            title = "东航趣游卡航班补查异常持续中"
+            body = "\n".join(
+                [
+                    f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
+                    "同一日期的航班补查异常已持续 1 小时以上",
+                    f"当前轮询间隔 {current_interval // 60} 分钟",
+                    "轮询间隔增大后仍然异常，请尽快检查。",
+                ]
+            )
+            warning_meta["last_escalated_at"] = now.isoformat()
+        else:
+            body = "\n".join(
+                [
+                    f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
+                    "可能已经触发风控，请检查确认",
+                ]
+            )
         notification = self._notify_warning(title, body, notifier, config)
         log_runtime(
             "external_warning",
@@ -997,6 +1102,7 @@ class MonitorService:
             current_warning_keys = set(self.state.previous_warning_keys)
             current_warning_keys.add(warning_key)
             self.state.previous_warning_keys = sorted(current_warning_keys)
+            self.state.warning_tracker[warning_key] = warning_meta
             self.state.save(self.state_path)
 
         return {
@@ -1020,6 +1126,7 @@ class MonitorService:
             self.state.previous_statuses = {}
             self.state.previous_flight_keys = []
             self.state.previous_warning_keys = []
+            self.state.warning_tracker = {}
             self.state.events = []
             self.state.last_daily_reset_date = reset_date
             self.state.save(self.state_path)
@@ -1049,21 +1156,63 @@ class MonitorService:
         if not self._is_rate_limited_error(exc):
             return
 
+        now = now_local()
         with self.lock:
             current_interval = self.state.effective_poll_interval_seconds or config.poll_interval_seconds
             next_interval = min(current_interval + config.backoff_step_seconds, config.max_poll_interval_seconds)
             self.state.effective_poll_interval_seconds = next_interval
+            poll_risk_tracker = dict(self.state.poll_risk_tracker)
+            first_seen_at = parse_iso_datetime(str(poll_risk_tracker.get("first_seen_at") or ""))
+            last_seen_at = parse_iso_datetime(str(poll_risk_tracker.get("last_seen_at") or ""))
+            last_notified_at = parse_iso_datetime(str(poll_risk_tracker.get("last_notified_at") or ""))
+            last_reminded_at = parse_iso_datetime(str(poll_risk_tracker.get("last_reminded_at") or ""))
+            if last_seen_at and (now - last_seen_at).total_seconds() > CONTINUOUS_WARNING_REMINDER_SECONDS:
+                first_seen_at = None
+                last_notified_at = None
+                last_reminded_at = None
+            if first_seen_at is None:
+                first_seen_at = now
+            poll_risk_tracker["first_seen_at"] = first_seen_at.isoformat()
+            poll_risk_tracker["last_seen_at"] = now.isoformat()
+            should_send_initial = last_notified_at is None
+            should_send_reminder = (
+                not should_send_initial
+                and (now - first_seen_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
+                and (
+                    last_reminded_at is None
+                    or (now - last_reminded_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
+                )
+            )
+            if should_send_initial:
+                poll_risk_tracker["last_notified_at"] = now.isoformat()
+            elif should_send_reminder:
+                poll_risk_tracker["last_reminded_at"] = now.isoformat()
+            self.state.poll_risk_tracker = poll_risk_tracker
             self.state.save(self.state_path)
 
-        title = "东航趣游卡轮询策略调整"
-        body = "\n".join(
-            [
-                f"检测到疑似风控或限流：{type(exc).__name__}",
-                f"原轮询间隔 {current_interval // 60} 分钟",
-                f"调整后轮询间隔 {next_interval // 60} 分钟",
-                "服务将按新的间隔继续轮询。",
-            ]
-        )
+        if not should_send_initial and not should_send_reminder:
+            return
+
+        if should_send_reminder:
+            title = "东航趣游卡疑似风控持续中"
+            body = "\n".join(
+                [
+                    f"疑似风控或限流已持续至少 {CONTINUOUS_WARNING_REMINDER_SECONDS // 3600} 小时",
+                    f"异常类型：{type(exc).__name__}",
+                    f"当前轮询间隔 {next_interval // 60} 分钟",
+                    "轮询间隔增大后仍然异常，请尽快检查。",
+                ]
+            )
+        else:
+            title = "东航趣游卡轮询策略调整"
+            body = "\n".join(
+                [
+                    f"检测到疑似风控或限流：{type(exc).__name__}",
+                    f"原轮询间隔 {current_interval // 60} 分钟",
+                    f"调整后轮询间隔 {next_interval // 60} 分钟",
+                    "服务将按新的间隔继续轮询。",
+                ]
+            )
         try:
             notifier.send(title, body)
         except Exception:  # noqa: BLE001

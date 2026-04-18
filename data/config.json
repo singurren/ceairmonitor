@@ -5,7 +5,7 @@
   "backoff_step_seconds": 300,
   "max_poll_interval_seconds": 1800,
   "start_offset_days": 0,
-  "days_ahead": 13,
+  "days_ahead": 34,
   "weekdays": [
     1,
     4,
