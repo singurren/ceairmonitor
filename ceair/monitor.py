@@ -334,6 +334,7 @@ class AppState:
     previous_flight_keys: list[str] = field(default_factory=list)
     previous_warning_keys: list[str] = field(default_factory=list)
     last_poll_at: str | None = None
+    last_successful_poll_at: str | None = None
     last_error: str | None = None
     effective_poll_interval_seconds: int | None = None
     last_daily_reset_date: str | None = None
@@ -725,6 +726,7 @@ class MonitorService:
             events = self._detect_events(summary, config)
             notification = self._notify(events, notifier, config)
             maintenance_report = self._maybe_send_maintenance_report(summary, maintainer_notifier)
+            poll_completed_at = now_local().isoformat()
             log_runtime(
                 "poll_completed",
                 redeemable_dates=len(summary.get("redeemable_dates", [])),
@@ -733,7 +735,8 @@ class MonitorService:
                 notification_sent=notification.get("sent"),
             )
             with self.lock:
-                self.state.last_poll_at = now_local().isoformat()
+                self.state.last_poll_at = poll_completed_at
+                self.state.last_successful_poll_at = poll_completed_at
                 self.state.last_error = None
                 self.state.last_summary = summary
                 self.state.events.extend(events)

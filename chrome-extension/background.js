@@ -181,12 +181,12 @@ async function pollAutoOpenTasks(reason) {
     await closeStaleAutoOpenedTabs(body, statusEndpoint, endpoint);
     const tasks = extractAutoOpenTasks(body);
     const autoOpenedTaskKeys = settings.autoOpenedTaskKeys || {};
-    const lastPollAt = String(body?.state?.last_poll_at || "");
+    const lastSuccessfulPollAt = String(body?.state?.last_successful_poll_at || "");
     let openedCount = 0;
 
     const pendingTasks = [];
     for (const task of tasks) {
-      const taskKey = `${task.origin}-${task.destination}:${task.date}:${lastPollAt}`;
+      const taskKey = `${task.origin}-${task.destination}:${task.date}:${lastSuccessfulPollAt}`;
       if (autoOpenedTaskKeys[taskKey]) {
         continue;
       }
@@ -227,7 +227,7 @@ async function pollAutoOpenTasks(reason) {
     await setTrace("auto_open_poll_completed", {
       reason,
       endpoint: statusEndpoint,
-      lastPollAt,
+      lastSuccessfulPollAt,
       taskCount: tasks.length,
       openedCount,
       deferredCount,
@@ -257,6 +257,9 @@ function deriveStatusEndpoint(endpoint) {
 }
 
 function extractAutoOpenTasks(statusBody) {
+  if (statusBody?.state?.last_error) {
+    return [];
+  }
   const ruleMatches = statusBody?.state?.last_summary?.rule_matches;
   if (!Array.isArray(ruleMatches)) {
     return [];
