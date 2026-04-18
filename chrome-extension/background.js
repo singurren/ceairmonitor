@@ -5,9 +5,6 @@ const DEFAULT_SETTINGS = {
 };
 const HOURLY_CLEANUP_PREFIX = "https://ecactivity.ceair.com/";
 const AUTO_OPEN_ALARM_MINUTES = 10;
-const AUTO_OPEN_FOLLOWUP_DELAY_MINUTES = 2;
-const AUTO_OPEN_BATCH_SIZE = 5;
-const AUTO_OPEN_SPACING_MS = 15000;
 const AUTO_OPEN_TIMEOUT_MS = 120000;
 const AUTO_OPEN_ALARM_NAME = "ceair-auto-open";
 const AUTO_OPEN_FOLLOWUP_ALARM_NAME = "ceair-auto-open-followup";
@@ -192,8 +189,9 @@ async function pollAutoOpenTasks(reason) {
       }
       pendingTasks.push({ ...task, taskKey });
     }
+    const autoOpenPlan = buildAutoOpenPlan(pendingTasks.length);
 
-    for (const task of pendingTasks.slice(0, AUTO_OPEN_BATCH_SIZE)) {
+    for (const task of pendingTasks.slice(0, autoOpenPlan.batchSize)) {
       const url = buildFlightListUrl(task.origin, task.destination, task.date, task.productCode, task.routeType);
       const tabId = await openOrFocusTab(url, task.taskKey);
       autoOpenedTaskKeys[task.taskKey] = new Date().toISOString();
@@ -210,8 +208,8 @@ async function pollAutoOpenTasks(reason) {
         await chrome.storage.local.set({ autoOpenedTabIds });
       }
       openedCount += 1;
-      if (openedCount < AUTO_OPEN_BATCH_SIZE && openedCount < pendingTasks.length) {
-        await sleep(AUTO_OPEN_SPACING_MS);
+      if (openedCount < autoOpenPlan.batchSize && openedCount < pendingTasks.length) {
+        await sleep(autoOpenPlan.spacingMs);
       }
     }
 
@@ -219,7 +217,7 @@ async function pollAutoOpenTasks(reason) {
     const deferredCount = Math.max(pendingTasks.length - openedCount, 0);
     if (deferredCount > 0) {
       chrome.alarms.create(AUTO_OPEN_FOLLOWUP_ALARM_NAME, {
-        delayInMinutes: AUTO_OPEN_FOLLOWUP_DELAY_MINUTES
+        delayInMinutes: autoOpenPlan.followupDelayMinutes
       });
     } else {
       await chrome.alarms.clear(AUTO_OPEN_FOLLOWUP_ALARM_NAME);
@@ -229,11 +227,13 @@ async function pollAutoOpenTasks(reason) {
       endpoint: statusEndpoint,
       lastSuccessfulPollAt,
       taskCount: tasks.length,
+      pendingTaskCount: pendingTasks.length,
       openedCount,
       deferredCount,
-      batchSize: AUTO_OPEN_BATCH_SIZE,
+      batchSize: autoOpenPlan.batchSize,
+      spacingMs: autoOpenPlan.spacingMs,
       followupScheduled: deferredCount > 0,
-      followupDelayMinutes: deferredCount > 0 ? AUTO_OPEN_FOLLOWUP_DELAY_MINUTES : 0
+      followupDelayMinutes: deferredCount > 0 ? autoOpenPlan.followupDelayMinutes : 0
     });
   } catch (error) {
     await setTrace("auto_open_poll_failed", {
@@ -242,6 +242,42 @@ async function pollAutoOpenTasks(reason) {
       error: String(error)
     });
   }
+}
+
+function buildAutoOpenPlan(taskCount) {
+  if (taskCount <= 2) {
+    return {
+      batchSize: 1,
+      spacingMs: 30000,
+      followupDelayMinutes: 3
+    };
+  }
+  if (taskCount <= 4) {
+    return {
+      batchSize: 2,
+      spacingMs: 25000,
+      followupDelayMinutes: 3
+    };
+  }
+  if (taskCount <= 8) {
+    return {
+      batchSize: 3,
+      spacingMs: 20000,
+      followupDelayMinutes: 2
+    };
+  }
+  if (taskCount <= 12) {
+    return {
+      batchSize: 4,
+      spacingMs: 15000,
+      followupDelayMinutes: 2
+    };
+  }
+  return {
+    batchSize: 5,
+    spacingMs: 15000,
+    followupDelayMinutes: 2
+  };
 }
 
 function deriveStatusEndpoint(endpoint) {
