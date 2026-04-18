@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS = {
 };
 const HOURLY_CLEANUP_PREFIX = "https://ecactivity.ceair.com/";
 const AUTO_OPEN_ALARM_MINUTES = 10;
+const DEFAULT_SERVICE_POLL_INTERVAL_SECONDS = 300;
 const AUTO_OPEN_TIMEOUT_MS = 120000;
 const AUTO_OPEN_ALARM_NAME = "ceair-auto-open";
 const AUTO_OPEN_FOLLOWUP_ALARM_NAME = "ceair-auto-open-followup";
@@ -189,7 +190,10 @@ async function pollAutoOpenTasks(reason) {
       }
       pendingTasks.push({ ...task, taskKey });
     }
-    const autoOpenPlan = buildAutoOpenPlan(pendingTasks.length);
+    const effectivePollIntervalSeconds = Number(
+      body?.state?.effective_poll_interval_seconds || body?.config?.poll_interval_seconds || DEFAULT_SERVICE_POLL_INTERVAL_SECONDS
+    );
+    const autoOpenPlan = buildAutoOpenPlan(pendingTasks.length, effectivePollIntervalSeconds);
 
     for (const task of pendingTasks.slice(0, autoOpenPlan.batchSize)) {
       const url = buildFlightListUrl(task.origin, task.destination, task.date, task.productCode, task.routeType);
@@ -228,8 +232,10 @@ async function pollAutoOpenTasks(reason) {
       lastSuccessfulPollAt,
       taskCount: tasks.length,
       pendingTaskCount: pendingTasks.length,
+      effectivePollIntervalSeconds,
       openedCount,
       deferredCount,
+      planLabel: autoOpenPlan.label,
       batchSize: autoOpenPlan.batchSize,
       spacingMs: autoOpenPlan.spacingMs,
       followupScheduled: deferredCount > 0,
@@ -244,9 +250,98 @@ async function pollAutoOpenTasks(reason) {
   }
 }
 
-function buildAutoOpenPlan(taskCount) {
+function buildAutoOpenPlan(taskCount, effectivePollIntervalSeconds) {
+  const normalizedPollIntervalSeconds = Math.max(
+    DEFAULT_SERVICE_POLL_INTERVAL_SECONDS,
+    Number.isFinite(effectivePollIntervalSeconds) ? effectivePollIntervalSeconds : DEFAULT_SERVICE_POLL_INTERVAL_SECONDS
+  );
+  const pacingBand = normalizedPollIntervalSeconds >= 900 ? "backoff_high" : normalizedPollIntervalSeconds >= 600 ? "backoff_medium" : "normal";
+
+  if (pacingBand === "backoff_high") {
+    if (taskCount <= 2) {
+      return {
+        label: "backoff_high_small",
+        batchSize: 1,
+        spacingMs: 45000,
+        followupDelayMinutes: 5
+      };
+    }
+    if (taskCount <= 4) {
+      return {
+        label: "backoff_high_medium_small",
+        batchSize: 2,
+        spacingMs: 35000,
+        followupDelayMinutes: 4
+      };
+    }
+    if (taskCount <= 8) {
+      return {
+        label: "backoff_high_medium",
+        batchSize: 3,
+        spacingMs: 30000,
+        followupDelayMinutes: 4
+      };
+    }
+    if (taskCount <= 12) {
+      return {
+        label: "backoff_high_large",
+        batchSize: 3,
+        spacingMs: 25000,
+        followupDelayMinutes: 3
+      };
+    }
+    return {
+      label: "backoff_high_xlarge",
+      batchSize: 4,
+      spacingMs: 25000,
+      followupDelayMinutes: 3
+    };
+  }
+
+  if (pacingBand === "backoff_medium") {
+    if (taskCount <= 2) {
+      return {
+        label: "backoff_medium_small",
+        batchSize: 1,
+        spacingMs: 35000,
+        followupDelayMinutes: 4
+      };
+    }
+    if (taskCount <= 4) {
+      return {
+        label: "backoff_medium_medium_small",
+        batchSize: 2,
+        spacingMs: 30000,
+        followupDelayMinutes: 4
+      };
+    }
+    if (taskCount <= 8) {
+      return {
+        label: "backoff_medium_medium",
+        batchSize: 3,
+        spacingMs: 25000,
+        followupDelayMinutes: 3
+      };
+    }
+    if (taskCount <= 12) {
+      return {
+        label: "backoff_medium_large",
+        batchSize: 4,
+        spacingMs: 20000,
+        followupDelayMinutes: 3
+      };
+    }
+    return {
+      label: "backoff_medium_xlarge",
+      batchSize: 4,
+      spacingMs: 20000,
+      followupDelayMinutes: 3
+    };
+  }
+
   if (taskCount <= 2) {
     return {
+      label: "normal_small",
       batchSize: 1,
       spacingMs: 30000,
       followupDelayMinutes: 3
@@ -254,6 +349,7 @@ function buildAutoOpenPlan(taskCount) {
   }
   if (taskCount <= 4) {
     return {
+      label: "normal_medium_small",
       batchSize: 2,
       spacingMs: 25000,
       followupDelayMinutes: 3
@@ -261,6 +357,7 @@ function buildAutoOpenPlan(taskCount) {
   }
   if (taskCount <= 8) {
     return {
+      label: "normal_medium",
       batchSize: 3,
       spacingMs: 20000,
       followupDelayMinutes: 2
@@ -268,12 +365,14 @@ function buildAutoOpenPlan(taskCount) {
   }
   if (taskCount <= 12) {
     return {
+      label: "normal_large",
       batchSize: 4,
       spacingMs: 15000,
       followupDelayMinutes: 2
     };
   }
   return {
+    label: "normal_xlarge",
     batchSize: 5,
     spacingMs: 15000,
     followupDelayMinutes: 2
