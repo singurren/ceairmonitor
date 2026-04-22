@@ -142,6 +142,7 @@ class MonitorRule:
     origin_codes: list[str]
     destination_codes: list[str]
     weekdays: list[int]
+    specific_dates: list[str] = field(default_factory=list)
     start_time: str = ""
     end_time: str = ""
     product_code: str = ""
@@ -160,6 +161,7 @@ class MonitorRule:
                 str(item).strip().upper() for item in data.get("destination_codes", []) if str(item).strip()
             ],
             weekdays=[int(item) for item in data.get("weekdays", [])],
+            specific_dates=[str(item).strip() for item in data.get("specific_dates", []) if str(item).strip()],
             start_time=str(data.get("start_time") or "").strip(),
             end_time=str(data.get("end_time") or "").strip(),
             product_code=str(data.get("product_code") or "").strip(),
@@ -196,6 +198,18 @@ def normalize_weekdays(weekdays: list[int]) -> list[int]:
     return normalized
 
 
+def normalize_specific_dates(dates: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for date_text in dates:
+        value = str(date_text).strip()
+        if not value:
+            continue
+        dt.date.fromisoformat(value)
+        if value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
 def validate_rule(rule: MonitorRule) -> None:
     if not rule.name:
         raise ValueError("rule name is required")
@@ -204,6 +218,9 @@ def validate_rule(rule: MonitorRule) -> None:
     if not rule.destination_codes:
         raise ValueError(f"rule {rule.name} missing destination_codes")
     rule.weekdays = normalize_weekdays(rule.weekdays)
+    rule.specific_dates = normalize_specific_dates(rule.specific_dates)
+    if not rule.weekdays and not rule.specific_dates:
+        raise ValueError(f"rule {rule.name} must define weekdays or specific_dates")
     if rule.start_time:
         parse_clock_time(rule.start_time)
     if rule.end_time:
@@ -252,6 +269,14 @@ def weekday_matches(date_text: str, weekdays: list[int]) -> bool:
     weekday = dt.date.fromisoformat(date_text).weekday()
     weekday = (weekday + 1) % 7
     return weekday in weekdays
+
+
+def rule_matches_date(rule: MonitorRule, date_text: str) -> bool:
+    if date_text in rule.specific_dates:
+        return True
+    if rule.weekdays and weekday_matches(date_text, rule.weekdays):
+        return True
+    return False
 
 
 def time_window_label(start_time: str, end_time: str) -> str:
@@ -937,7 +962,7 @@ class MonitorService:
         for rule in rules:
             if origin not in rule.origin_codes or destination not in rule.destination_codes:
                 continue
-            if not weekday_matches(date_text, rule.weekdays):
+            if not rule_matches_date(rule, date_text):
                 continue
 
             matched_flights = [
@@ -1290,7 +1315,7 @@ class MonitorService:
                 for destination in rule.destination_codes:
                     route_key = f"{origin}-{destination}"
                     for date_text, status in sorted(route_statuses.get(route_key, {}).items()):
-                        if status != "2" or not weekday_matches(date_text, rule.weekdays):
+                        if status != "2" or not rule_matches_date(rule, date_text):
                             continue
                         match_item = {
                             "rule_name": rule.name,
@@ -1469,7 +1494,7 @@ class MonitorService:
             old_status = previous.get(key)
             if item["status"] == "2" and old_status != "2":
                 rule = rules_by_name.get(item["rule_name"])
-                if rule and weekday_matches(item["date"], rule.weekdays):
+                if rule and rule_matches_date(rule, item["date"]):
                     events.append(
                         {
                             "type": "redeemable_opened",

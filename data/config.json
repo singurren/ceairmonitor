@@ -83,6 +83,51 @@
       ],
       "start_time": "12:00",
       "end_time": ""
+    },
+    {
+      "name": "返程 深圳到上海 2026-04-29 下午后",
+      "origin_codes": [
+        "SZX"
+      ],
+      "destination_codes": [
+        "SHA"
+      ],
+      "weekdays": [],
+      "specific_dates": [
+        "2026-04-29"
+      ],
+      "start_time": "14:00",
+      "end_time": ""
+    },
+    {
+      "name": "去程 上海到深圳 2026-05-06 上午前",
+      "origin_codes": [
+        "SHA"
+      ],
+      "destination_codes": [
+        "SZX"
+      ],
+      "weekdays": [],
+      "specific_dates": [
+        "2026-05-06"
+      ],
+      "start_time": "",
+      "end_time": "09:30"
+    },
+    {
+      "name": "返程 深圳到上海 2026-05-08 下午后",
+      "origin_codes": [
+        "SZX"
+      ],
+      "destination_codes": [
+        "SHA"
+      ],
+      "weekdays": [],
+      "specific_dates": [
+        "2026-05-08"
+      ],
+      "start_time": "15:00",
+      "end_time": ""
     }
   ]
 }

@@ -163,6 +163,14 @@ uv sync --extra browser
       "destination_codes": ["SHA"],
       "weekdays": [4],
       "start_time": "16:00"
+    },
+    {
+      "name": "深圳回上海 2026-05-08 下午后",
+      "origin_codes": ["SZX"],
+      "destination_codes": ["SHA"],
+      "weekdays": [],
+      "specific_dates": ["2026-05-08"],
+      "start_time": "15:00"
     }
   ]
 }
@@ -170,6 +178,8 @@ uv sync --extra browser
 
 规则语义：
 
+- `weekdays` 和 `specific_dates` 二选一或同时存在都可以；只要命中其中之一，这条规则就会参与当天匹配
+- 如果只想监控某几个一次性日期，可以把 `weekdays` 设为空数组，并填写 `specific_dates`
 - 没有 `start_time / end_time` 时，沿用日期级事件
 - 配了时间窗口时，只有航班级探测拿到命中航班后才发通知
 - 航班级事件主键现在是：`rule + route + date + flight_no + dep_time`
