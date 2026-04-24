@@ -39,7 +39,7 @@ ACTIVE_POLL_END_HOUR = 1
 ACTIVE_POLL_END_MINUTE = 0
 MAINTENANCE_REPORT_HOUR = 12
 MAINTENANCE_REPORT_MINUTE = 0
-CONTINUOUS_WARNING_REMINDER_SECONDS = 3600
+CONTINUOUS_WARNING_REMINDER_SECONDS = 7200
 CITY_LABELS = {
     "SHA": "上海",
     "PVG": "上海",
@@ -317,7 +317,7 @@ def flight_warning_key(origin: str, destination: str, date_text: str, reason: st
 class AppConfig:
     host: str = HOST
     port: int = PORT
-    poll_interval_seconds: int = 300
+    poll_interval_seconds: int = 600
     backoff_step_seconds: int = 300
     max_poll_interval_seconds: int = 1800
     start_offset_days: int = 0
@@ -616,7 +616,10 @@ class MonitorService:
         self.stop_event = threading.Event()
         self.poll_event = threading.Event()
         self.thread: threading.Thread | None = None
-        if self.state.effective_poll_interval_seconds is None:
+        if (
+            self.state.effective_poll_interval_seconds is None
+            or self.state.effective_poll_interval_seconds < self.config.poll_interval_seconds
+        ):
             self.state.effective_poll_interval_seconds = self.config.poll_interval_seconds
 
     def start(self) -> None:
@@ -695,7 +698,10 @@ class MonitorService:
                 if key not in allowed:
                     raise ValueError(f"unsupported config field: {key}")
                 setattr(self.config, key, value)
-            if self.state.effective_poll_interval_seconds is None:
+            if (
+                self.state.effective_poll_interval_seconds is None
+                or self.state.effective_poll_interval_seconds < self.config.poll_interval_seconds
+            ):
                 self.state.effective_poll_interval_seconds = self.config.poll_interval_seconds
             self.config.save(self.config_path)
             self.state.save(self.state_path)
@@ -1059,6 +1065,7 @@ class MonitorService:
             notifier = ServerChanNotifier(normalize_maintainer_sendkeys(config), config.request_timeout_seconds)
             previous_warning_keys = set(self.state.previous_warning_keys)
             current_interval = self.state.effective_poll_interval_seconds or config.poll_interval_seconds
+            next_interval = min(current_interval + config.backoff_step_seconds, config.max_poll_interval_seconds)
             tracker = dict(self.state.warning_tracker)
 
         date_text = str(payload.get("date") or "").strip()
@@ -1091,6 +1098,7 @@ class MonitorService:
 
         if not should_send_initial and not should_send_escalation:
             with self.lock:
+                self.state.effective_poll_interval_seconds = next_interval
                 self.state.warning_tracker[warning_key] = warning_meta
                 self.state.save(self.state_path)
             return {
@@ -1107,8 +1115,8 @@ class MonitorService:
             body = "\n".join(
                 [
                     f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
-                    "同一日期的航班补查异常已持续 1 小时以上",
-                    f"当前轮询间隔 {current_interval // 60} 分钟",
+                    "同一日期的航班补查异常已持续 2 小时以上",
+                    f"当前轮询间隔 {next_interval // 60} 分钟",
                     "轮询间隔增大后仍然异常，请尽快检查。",
                 ]
             )
@@ -1118,6 +1126,7 @@ class MonitorService:
                 [
                     f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
                     "可能已经触发风控，请检查确认",
+                    f"轮询间隔已调整到 {next_interval // 60} 分钟",
                 ]
             )
         notification = self._notify_warning(title, body, notifier, config)
@@ -1134,6 +1143,7 @@ class MonitorService:
             current_warning_keys = set(self.state.previous_warning_keys)
             current_warning_keys.add(warning_key)
             self.state.previous_warning_keys = sorted(current_warning_keys)
+            self.state.effective_poll_interval_seconds = next_interval
             self.state.warning_tracker[warning_key] = warning_meta
             self.state.save(self.state_path)
 
