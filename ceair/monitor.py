@@ -1170,10 +1170,16 @@ class MonitorService:
             self.state.previous_external_flight_keys = []
             self.state.previous_warning_keys = []
             self.state.warning_tracker = {}
+            self.state.poll_risk_tracker = {}
+            self.state.effective_poll_interval_seconds = self.config.poll_interval_seconds
             self.state.events = []
             self.state.last_daily_reset_date = reset_date
             self.state.save(self.state_path)
-        log_runtime("daily_state_reset", reset_date=reset_date)
+        log_runtime(
+            "daily_state_reset",
+            reset_date=reset_date,
+            effective_poll_interval_seconds=self.config.poll_interval_seconds,
+        )
 
     def _is_rate_limited_error(self, exc: Exception) -> bool:
         if isinstance(exc, urllib.error.HTTPError):
