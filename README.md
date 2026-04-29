@@ -172,6 +172,20 @@ uv sync --extra browser
       "weekdays": [],
       "specific_dates": ["2026-05-08"],
       "start_time": "15:00"
+    },
+    {
+      "name": "行享东方 杭州到悉尼 2026-05-25 至 2026-06-09",
+      "card_name": "行享东方",
+      "notification_group": "economy_coupon",
+      "origin_codes": ["HGH"],
+      "destination_codes": ["SYD"],
+      "weekdays": [],
+      "specific_dates": ["2026-05-25", "2026-05-26"],
+      "product_code": "XXDFGJJJ1000",
+      "query_extra_params": {
+        "ticketType": "economyClass",
+        "mIsInter": "1"
+      }
     }
   ]
 }
@@ -181,6 +195,9 @@ uv sync --extra browser
 
 - `weekdays` 和 `specific_dates` 二选一或同时存在都可以；只要命中其中之一，这条规则就会参与当天匹配
 - 如果只想监控某几个一次性日期，可以把 `weekdays` 设为空数组，并填写 `specific_dates`
+- 如果 `specific_dates` 超出默认 `days_ahead` 查询窗口，服务会自动把本轮查询窗口扩展到最晚的指定日期
+- `notification_group` 可用于把不同卡的通知发给不同 Server 酱 key；当前 `economy_coupon` 会读取 `economy_coupon_serverchan_sendkeys`
+- `query_extra_params` 会透传到日期级查询接口，国际行享东方卡需要 `ticketType=economyClass` 和 `mIsInter=1`
 - 没有 `start_time / end_time` 时，沿用日期级事件
 - 配了时间窗口时，只有航班级探测拿到命中航班后才发通知
 - 航班级事件主键现在是：`rule + route + date + flight_no + dep_time`
@@ -430,6 +447,9 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
     "SCTxxxxxxxxxxxxxxxx",
     "SCTyyyyyyyyyyyyyyyy"
   ],
+  "economy_coupon_serverchan_sendkeys": [
+    "SCTaaaaaaaaaaaaaaaa"
+  ],
   "maintainer_serverchan_sendkeys": [
     "SCTzzzzzzzzzzzzzzzz"
   ]
@@ -448,10 +468,12 @@ uv run python -m ceair.browser --target-url https://m.ceair.com/
   - `data/secrets.local.json` 里的 `serverchan_sendkeys`
 - `data/secrets.local.json` 已加入 `.gitignore`，不会被提交
 - 如果最终合并后仍为空，服务仍然运行，只是不发送推送
+- `economy_coupon_serverchan_sendkeys`
+  仅用于行享东方卡这类独立通知组；行享东方命中不会发送给普通 `serverchan_sendkeys`
 - `maintainer_serverchan_sendkeys`
   仅用于维护者通知，不参与普通放票业务通知
 - 服务会在每天北京时间 `12:00` 之后首次轮询时，向 `maintainer_serverchan_sendkeys` 发送一条系统自检消息
-- 航班补查风控告警、轮询触发疑似风控后的策略调整提醒、以及“持续 `1` 小时仍异常”的升级提醒，也都只发送给 `maintainer_serverchan_sendkeys`
+- 航班补查风控告警、轮询触发疑似风控后的策略调整提醒、以及“持续 `2` 小时仍异常”的升级提醒，也都只发送给 `maintainer_serverchan_sendkeys`
 
 当前航班级通知正文格式统一为：
 

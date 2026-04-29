@@ -44,6 +44,8 @@ CITY_LABELS = {
     "SHA": "上海",
     "PVG": "上海",
     "SZX": "深圳",
+    "HGH": "杭州",
+    "SYD": "悉尼",
 }
 
 
@@ -104,6 +106,10 @@ def load_secret_maintainer_sendkeys(path: Path) -> list[str]:
     return load_secret_list(path, "maintainer_serverchan_sendkeys")
 
 
+def load_secret_economy_coupon_sendkeys(path: Path) -> list[str]:
+    return load_secret_list(path, "economy_coupon_serverchan_sendkeys")
+
+
 def normalize_sendkeys(config: "AppConfig") -> list[str]:
     keys: list[str] = []
     for key in config.serverchan_sendkeys:
@@ -120,6 +126,15 @@ def normalize_sendkeys(config: "AppConfig") -> list[str]:
 def normalize_maintainer_sendkeys(config: "AppConfig") -> list[str]:
     keys: list[str] = []
     for key in config.secret_maintainer_serverchan_sendkeys:
+        cleaned = key.strip()
+        if cleaned and cleaned not in keys:
+            keys.append(cleaned)
+    return keys
+
+
+def normalize_economy_coupon_sendkeys(config: "AppConfig") -> list[str]:
+    keys: list[str] = []
+    for key in config.secret_economy_coupon_serverchan_sendkeys:
         cleaned = key.strip()
         if cleaned and cleaned not in keys:
             keys.append(cleaned)
@@ -143,6 +158,8 @@ class MonitorRule:
     destination_codes: list[str]
     weekdays: list[int]
     specific_dates: list[str] = field(default_factory=list)
+    card_name: str = "东航趣游卡"
+    notification_group: str = "default"
     start_time: str = ""
     end_time: str = ""
     product_code: str = ""
@@ -150,6 +167,7 @@ class MonitorRule:
     index_no: str = ""
     channel_code: str = ""
     sales_channel: str = ""
+    query_extra_params: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
 
     @classmethod
@@ -162,6 +180,8 @@ class MonitorRule:
             ],
             weekdays=[int(item) for item in data.get("weekdays", [])],
             specific_dates=[str(item).strip() for item in data.get("specific_dates", []) if str(item).strip()],
+            card_name=str(data.get("card_name") or "东航趣游卡").strip() or "东航趣游卡",
+            notification_group=str(data.get("notification_group") or "default").strip() or "default",
             start_time=str(data.get("start_time") or "").strip(),
             end_time=str(data.get("end_time") or "").strip(),
             product_code=str(data.get("product_code") or "").strip(),
@@ -169,6 +189,7 @@ class MonitorRule:
             index_no=str(data.get("index_no") or "").strip(),
             channel_code=str(data.get("channel_code") or "").strip(),
             sales_channel=str(data.get("sales_channel") or "").strip(),
+            query_extra_params=dict(data.get("query_extra_params") or {}),
             enabled=bool(data.get("enabled", True)),
         )
 
@@ -337,6 +358,7 @@ class AppConfig:
     serverchan_sendkeys: list[str] = field(default_factory=list)
     secret_serverchan_sendkeys: list[str] = field(default_factory=list, repr=False)
     secret_maintainer_serverchan_sendkeys: list[str] = field(default_factory=list, repr=False)
+    secret_economy_coupon_serverchan_sendkeys: list[str] = field(default_factory=list, repr=False)
     notifications_enabled: bool = True
     request_timeout_seconds: int = 20
     flight_level_enabled: bool = False
@@ -368,6 +390,7 @@ class AppConfig:
         config = cls(**data)
         config.secret_serverchan_sendkeys = load_secret_sendkeys(SECRETS_PATH)
         config.secret_maintainer_serverchan_sendkeys = load_secret_maintainer_sendkeys(SECRETS_PATH)
+        config.secret_economy_coupon_serverchan_sendkeys = load_secret_economy_coupon_sendkeys(SECRETS_PATH)
         return config
 
     def save(self, path: Path) -> None:
@@ -378,6 +401,7 @@ class AppConfig:
         data = asdict(self)
         data.pop("secret_serverchan_sendkeys", None)
         data.pop("secret_maintainer_serverchan_sendkeys", None)
+        data.pop("secret_economy_coupon_serverchan_sendkeys", None)
         return data
 
 
@@ -475,6 +499,7 @@ class CeairClient:
         index_no: str,
         channel_code: str,
         sales_channel: str,
+        extra_params: dict[str, Any] | None = None,
     ) -> dict[str, str]:
         payload = {
             "depDate": dep_date.isoformat(),
@@ -486,6 +511,8 @@ class CeairClient:
             "channelCode": channel_code,
             "salesChannel": sales_channel,
         }
+        if extra_params:
+            payload.update({key: value for key, value in extra_params.items() if value is not None})
         request = urllib.request.Request(
             CEAIR_ENDPOINT,
             data=json.dumps(payload).encode(),
@@ -820,6 +847,10 @@ class MonitorService:
             config = self.config
             client = CeairClient(config)
             notifier = ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds)
+            economy_coupon_notifier = ServerChanNotifier(
+                normalize_economy_coupon_sendkeys(config),
+                config.request_timeout_seconds,
+            )
             maintainer_notifier = ServerChanNotifier(
                 normalize_maintainer_sendkeys(config),
                 config.request_timeout_seconds,
@@ -835,7 +866,14 @@ class MonitorService:
             self._maybe_reset_daily_state()
             summary = self._collect_summary(client, config)
             events = self._detect_events(summary, config)
-            notification = self._notify(events, notifier, config)
+            notification = self._notify_by_group(
+                events,
+                {
+                    "default": notifier,
+                    "economy_coupon": economy_coupon_notifier,
+                },
+                config,
+            )
             maintenance_report = self._maybe_send_maintenance_report(summary, maintainer_notifier)
             poll_completed_at = now_local().isoformat()
             log_runtime(
@@ -984,6 +1022,8 @@ class MonitorService:
             matched_rules.append(
                 {
                     "rule_name": rule.name,
+                    "card_name": rule.card_name,
+                    "notification_group": rule.notification_group,
                     "origin": origin,
                     "destination": destination,
                     "date": date_text,
@@ -1018,6 +1058,8 @@ class MonitorService:
                     {
                         "type": "flight_window_opened",
                         "rule_name": item["rule_name"],
+                        "card_name": item.get("card_name", "东航趣游卡"),
+                        "notification_group": item.get("notification_group", "default"),
                         "route": f"{item['origin']}-{item['destination']}",
                         "origin": item["origin"],
                         "destination": item["destination"],
@@ -1310,6 +1352,18 @@ class MonitorService:
         config: AppConfig,
     ) -> None:
         if not self._is_rate_limited_error(exc):
+            title = "东航兑换卡轮询异常"
+            body = "\n".join(
+                [
+                    f"异常类型：{type(exc).__name__}",
+                    str(exc),
+                    "请检查服务日志和接口参数。",
+                ]
+            )
+            try:
+                notifier.send(title, body)
+            except Exception:  # noqa: BLE001
+                pass
             return
 
         now = now_local()
@@ -1377,9 +1431,17 @@ class MonitorService:
     def _collect_summary(self, client: CeairClient, config: AppConfig) -> dict[str, Any]:
         today = now_local().date()
         start_date = today + dt.timedelta(days=config.start_offset_days)
-        end_date = start_date + dt.timedelta(days=config.days_ahead)
-        monitored_dates = {day.isoformat(): day for day in date_range(start_date, end_date)}
         rules = effective_rules(config)
+        end_date = start_date + dt.timedelta(days=config.days_ahead)
+        specific_dates = [
+            dt.date.fromisoformat(date_text)
+            for rule in rules
+            for date_text in rule.specific_dates
+            if dt.date.fromisoformat(date_text) >= start_date
+        ]
+        if specific_dates:
+            end_date = max(end_date, max(specific_dates))
+        monitored_dates = {day.isoformat(): day for day in date_range(start_date, end_date)}
         route_results: list[dict[str, Any]] = []
         current_statuses: dict[str, str] = {}
         redeemable_dates: list[dict[str, Any]] = []
@@ -1405,6 +1467,7 @@ class MonitorService:
                             "index_no": rule.index_no,
                             "channel_code": rule.channel_code,
                             "sales_channel": rule.sales_channel,
+                            "query_extra_params": rule.query_extra_params,
                         },
                     )
 
@@ -1422,6 +1485,7 @@ class MonitorService:
                     route_query["index_no"],
                     route_query["channel_code"],
                     route_query["sales_channel"],
+                    route_query["query_extra_params"],
                 )
                 for date_text, status in chunk_result.items():
                     if date_text in monitored_dates:
@@ -1446,6 +1510,8 @@ class MonitorService:
                             "destination": destination,
                             "date": date_text,
                             "status": status,
+                            "card_name": rule.card_name,
+                            "notification_group": rule.notification_group,
                             "time_window": {
                                 "start": rule.start_time,
                                 "end": rule.end_time,
@@ -1465,6 +1531,8 @@ class MonitorService:
                                 "destination": destination,
                                 "date": date_text,
                                 "status": status,
+                                "card_name": rule.card_name,
+                                "notification_group": rule.notification_group,
                             }
                         )
                         rule_matches.append(match_item)
@@ -1622,6 +1690,8 @@ class MonitorService:
                         {
                             "type": "redeemable_opened",
                             "rule_name": item["rule_name"],
+                            "card_name": item.get("card_name", "东航趣游卡"),
+                            "notification_group": item.get("notification_group", "default"),
                             "route": route_key,
                             "origin": item["origin"],
                             "destination": item["destination"],
@@ -1652,6 +1722,8 @@ class MonitorService:
                     {
                         "type": "flight_window_opened",
                         "rule_name": item["rule_name"],
+                        "card_name": item.get("card_name", "东航趣游卡"),
+                        "notification_group": item.get("notification_group", "default"),
                         "route": f"{item['origin']}-{item['destination']}",
                         "origin": item["origin"],
                         "destination": item["destination"],
@@ -1681,6 +1753,8 @@ class MonitorService:
         if not events:
             return {"sent": False, "reason": "no_new_events"}
 
+        card_names = sorted({str(event.get("card_name") or "东航趣游卡") for event in events})
+        card_name = card_names[0] if len(card_names) == 1 else "东航兑换卡"
         flight_groups: dict[tuple[str, str, str], list[tuple[str, str]]] = {}
         date_groups: dict[tuple[str, str, str], list[str]] = {}
         for event in events:
@@ -1695,9 +1769,9 @@ class MonitorService:
                 [],
             ).append(event["rule_name"])
 
-        title = "东航趣游卡有可兑换票"
+        title = f"{card_name}有可兑换票"
         if flight_groups:
-            title = "东航趣游卡命中目标航班"
+            title = f"{card_name}命中目标航班"
             route_sections: dict[tuple[str, str], list[str]] = {}
             for date_text, origin, destination in sorted(flight_groups, key=lambda item: (item[1], item[2], item[0])):
                 flights = sorted(set(flight_groups[(date_text, origin, destination)]))
@@ -1733,6 +1807,36 @@ class MonitorService:
             total_count=result.get("total_count"),
         )
         return result
+
+    def _notify_by_group(
+        self,
+        events: list[dict[str, Any]],
+        notifiers: dict[str, ServerChanNotifier],
+        config: AppConfig,
+    ) -> dict[str, Any]:
+        if not config.notifications_enabled:
+            return {"sent": False, "reason": "notifications_disabled"}
+        if not events:
+            return {"sent": False, "reason": "no_new_events"}
+
+        grouped_events: dict[str, list[dict[str, Any]]] = {}
+        for event in events:
+            group = str(event.get("notification_group") or "default")
+            grouped_events.setdefault(group, []).append(event)
+
+        results = {}
+        sent = False
+        for group, group_events in sorted(grouped_events.items()):
+            notifier = notifiers.get(group) or notifiers["default"]
+            result = self._notify(group_events, notifier, config)
+            results[group] = result
+            sent = sent or bool(result.get("sent"))
+
+        return {
+            "sent": sent,
+            "reason": "grouped_notifications",
+            "groups": results,
+        }
 
     def _notify_warning(
         self,

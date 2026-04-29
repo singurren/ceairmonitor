@@ -128,6 +128,44 @@
       ],
       "start_time": "15:00",
       "end_time": ""
+    },
+    {
+      "name": "行享东方 杭州到悉尼 2026-05-25 至 2026-06-09",
+      "card_name": "行享东方",
+      "notification_group": "economy_coupon",
+      "origin_codes": [
+        "HGH"
+      ],
+      "destination_codes": [
+        "SYD"
+      ],
+      "weekdays": [],
+      "specific_dates": [
+        "2026-05-25",
+        "2026-05-26",
+        "2026-05-27",
+        "2026-05-28",
+        "2026-05-29",
+        "2026-05-30",
+        "2026-05-31",
+        "2026-06-01",
+        "2026-06-02",
+        "2026-06-03",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-06",
+        "2026-06-07",
+        "2026-06-08",
+        "2026-06-09"
+      ],
+      "product_code": "XXDFGJJJ1000",
+      "route_type": "OW",
+      "query_extra_params": {
+        "ticketType": "economyClass",
+        "mIsInter": "1"
+      },
+      "start_time": "",
+      "end_time": ""
     }
   ]
 }
