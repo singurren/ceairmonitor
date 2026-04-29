@@ -313,6 +313,10 @@ def flight_warning_key(origin: str, destination: str, date_text: str, reason: st
     return f"{origin}-{destination}:{date_text}:{reason}"
 
 
+def external_batch_completion_key(origin: str, destination: str, date_text: str) -> str:
+    return f"{origin}-{destination}:{date_text}"
+
+
 @dataclass
 class AppConfig:
     host: str = HOST
@@ -393,6 +397,7 @@ class AppState:
     last_maintenance_report_date: str | None = None
     warning_tracker: dict[str, dict[str, str]] = field(default_factory=dict)
     poll_risk_tracker: dict[str, str] = field(default_factory=dict)
+    external_flight_batches: dict[str, dict[str, Any]] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -1026,12 +1031,24 @@ class MonitorService:
                     }
                 )
 
-        notification = self._notify(events, notifier, config)
+        auto_open_poll_at = str(payload.get("auto_open_poll_at") or "").strip()
+        completion_key = external_batch_completion_key(origin, destination, date_text)
+        if auto_open_poll_at:
+            notification = self._record_external_batch_result(
+                auto_open_poll_at,
+                completion_key,
+                events,
+                notifier,
+                config,
+            )
+        else:
+            notification = self._notify(events, notifier, config)
         result = {
             "accepted": True,
             "source": str(payload.get("source") or "external"),
             "route": f"{origin}-{destination}",
             "date": date_text,
+            "auto_open_poll_at": auto_open_poll_at,
             "flight_count": len(normalized_flights),
             "matched_rules": matched_rules,
             "new_event_count": len(events),
@@ -1059,6 +1076,79 @@ class MonitorService:
 
         return result
 
+    def _expected_external_batch_keys(self, poll_at: str) -> set[str]:
+        if not poll_at:
+            return set()
+        with self.lock:
+            if self.state.last_successful_poll_at != poll_at:
+                return set()
+            rule_matches = self.state.last_summary.get("rule_matches", [])
+
+        expected: set[str] = set()
+        if not isinstance(rule_matches, list):
+            return expected
+        for item in rule_matches:
+            if not isinstance(item, dict) or item.get("status") != "2":
+                continue
+            origin = str(item.get("origin") or "").strip().upper()
+            destination = str(item.get("destination") or "").strip().upper()
+            date_text = str(item.get("date") or "").strip()
+            if origin and destination and date_text:
+                expected.add(external_batch_completion_key(origin, destination, date_text))
+        return expected
+
+    def _record_external_batch_result(
+        self,
+        poll_at: str,
+        completion_key: str,
+        events: list[dict[str, Any]],
+        notifier: ServerChanNotifier,
+        config: AppConfig,
+    ) -> dict[str, Any]:
+        expected_keys = self._expected_external_batch_keys(poll_at)
+        if not expected_keys:
+            return self._notify(events, notifier, config)
+
+        notification_events: list[dict[str, Any]] | None = None
+        with self.lock:
+            batch = dict(self.state.external_flight_batches.get(poll_at) or {})
+            completed_keys = set(batch.get("completed_keys") or [])
+            stored_events = list(batch.get("events") or [])
+            completed_keys.add(completion_key)
+            stored_events.extend(events)
+            batch["expected_keys"] = sorted(expected_keys)
+            batch["completed_keys"] = sorted(completed_keys)
+            batch["events"] = stored_events
+            batch["updated_at"] = now_local().isoformat()
+            already_notified = bool(batch.get("notified"))
+            is_complete = expected_keys.issubset(completed_keys)
+            if is_complete and not already_notified:
+                notification_events = stored_events
+                batch["notified"] = True
+                batch["notified_at"] = now_local().isoformat()
+            self.state.external_flight_batches[poll_at] = batch
+            self.state.save(self.state_path)
+
+        if notification_events is None:
+            return {
+                "sent": False,
+                "reason": "external_batch_waiting",
+                "completed_count": len(completed_keys),
+                "expected_count": len(expected_keys),
+            }
+        return self._notify(notification_events, notifier, config)
+
+    def _mark_external_batch_completed(
+        self,
+        poll_at: str,
+        completion_key: str,
+        notifier: ServerChanNotifier,
+        config: AppConfig,
+    ) -> dict[str, Any] | None:
+        if not poll_at or not completion_key:
+            return None
+        return self._record_external_batch_result(poll_at, completion_key, [], notifier, config)
+
     def submit_external_warning(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             config = self.config
@@ -1072,11 +1162,13 @@ class MonitorService:
         origin = str(payload.get("origin") or "").strip().upper()
         destination = str(payload.get("destination") or "").strip().upper()
         reason = str(payload.get("reason") or "flight_info_missing").strip() or "flight_info_missing"
+        auto_open_poll_at = str(payload.get("auto_open_poll_at") or "").strip()
         if not date_text or not origin or not destination:
             raise ValueError("missing date, origin or destination")
         dt.date.fromisoformat(date_text)
 
         warning_key = flight_warning_key(origin, destination, date_text, reason)
+        completion_key = external_batch_completion_key(origin, destination, date_text)
         now = now_local()
         warning_meta = dict(tracker.get(warning_key) or {})
         last_seen_at = parse_iso_datetime(str(warning_meta.get("last_seen_at") or ""))
@@ -1101,12 +1193,19 @@ class MonitorService:
                 self.state.effective_poll_interval_seconds = next_interval
                 self.state.warning_tracker[warning_key] = warning_meta
                 self.state.save(self.state_path)
+            batch_notification = self._mark_external_batch_completed(
+                auto_open_poll_at,
+                completion_key,
+                ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds),
+                config,
+            )
             return {
                 "accepted": True,
                 "reason": reason,
                 "date": date_text,
                 "route": f"{origin}-{destination}",
                 "notification": {"sent": False, "reason": "duplicate_warning"},
+                "batch_notification": batch_notification,
             }
 
         title = "东航趣游卡航班补查异常"
@@ -1146,6 +1245,12 @@ class MonitorService:
             self.state.effective_poll_interval_seconds = next_interval
             self.state.warning_tracker[warning_key] = warning_meta
             self.state.save(self.state_path)
+        batch_notification = self._mark_external_batch_completed(
+            auto_open_poll_at,
+            completion_key,
+            ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds),
+            config,
+        )
 
         return {
             "accepted": True,
@@ -1153,6 +1258,7 @@ class MonitorService:
             "date": date_text,
             "route": f"{origin}-{destination}",
             "notification": notification,
+            "batch_notification": batch_notification,
         }
 
     def _maybe_reset_daily_state(self) -> None:
@@ -1171,6 +1277,7 @@ class MonitorService:
             self.state.previous_warning_keys = []
             self.state.warning_tracker = {}
             self.state.poll_risk_tracker = {}
+            self.state.external_flight_batches = {}
             self.state.effective_poll_interval_seconds = self.config.poll_interval_seconds
             self.state.events = []
             self.state.last_daily_reset_date = reset_date
@@ -1591,11 +1698,11 @@ class MonitorService:
         title = "东航趣游卡有可兑换票"
         if flight_groups:
             title = "东航趣游卡命中目标航班"
-            sections = []
-            for date_text, origin, destination in sorted(flight_groups):
+            route_sections: dict[tuple[str, str], list[str]] = {}
+            for date_text, origin, destination in sorted(flight_groups, key=lambda item: (item[1], item[2], item[0])):
                 flights = sorted(set(flight_groups[(date_text, origin, destination)]))
                 flight_line = "； ".join(f"{dep_time}，{flight_no}" for dep_time, flight_no in flights)
-                sections.append(
+                route_sections.setdefault((origin, destination), []).append(
                     "\n".join(
                         [
                             f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
@@ -1603,11 +1710,11 @@ class MonitorService:
                         ]
                     )
                 )
-            body = "\n\n".join(sections)
+            body = "\n\n".join("\n".join(route_sections[route]) for route in sorted(route_sections))
         else:
-            sections = []
-            for date_text, origin, destination in sorted(date_groups):
-                sections.append(
+            route_sections: dict[tuple[str, str], list[str]] = {}
+            for date_text, origin, destination in sorted(date_groups, key=lambda item: (item[1], item[2], item[0])):
+                route_sections.setdefault((origin, destination), []).append(
                     "\n".join(
                         [
                             f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
@@ -1615,7 +1722,7 @@ class MonitorService:
                         ]
                     )
                 )
-            body = "\n\n".join(sections)
+            body = "\n\n".join("\n".join(route_sections[route]) for route in sorted(route_sections))
         result = notifier.send(title, body)
         log_runtime(
             "business_notification",

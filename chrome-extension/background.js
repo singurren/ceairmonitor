@@ -80,6 +80,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function handleCapturedFlights(message, sender) {
+  const autoOpenMeta = await getAutoOpenedTabMeta(sender);
   await setTrace("background_received_flights", {
     route: `${message.origin}-${message.destination}`,
     date: message.date,
@@ -100,6 +101,8 @@ async function handleCapturedFlights(message, sender) {
     date: message.date,
     origin: message.origin,
     destination: message.destination,
+    auto_open_task_key: autoOpenMeta?.taskKey || "",
+    auto_open_poll_at: autoOpenMeta?.lastSuccessfulPollAt || "",
     flights: message.flights
   };
 
@@ -205,6 +208,7 @@ async function pollAutoOpenTasks(reason) {
         const autoOpenedTabIds = (await chrome.storage.local.get(["autoOpenedTabIds"])).autoOpenedTabIds || {};
         autoOpenedTabIds[String(tabId)] = {
           taskKey: task.taskKey,
+          lastSuccessfulPollAt,
           origin: task.origin,
           destination: task.destination,
           date: task.date,
@@ -438,6 +442,16 @@ async function maybeCloseAutoOpenedTab(sender) {
   });
 }
 
+async function getAutoOpenedTabMeta(sender) {
+  const tabId = sender?.tab?.id;
+  if (!tabId) {
+    return null;
+  }
+  const data = await chrome.storage.local.get(["autoOpenedTabIds"]);
+  const autoOpenedTabIds = data.autoOpenedTabIds || {};
+  return autoOpenedTabIds[String(tabId)] || null;
+}
+
 async function closeStaleAutoOpenedTabs(statusBody, statusEndpoint, endpoint) {
   const now = Date.now();
   const data = await chrome.storage.local.get(["autoOpenedTabIds"]);
@@ -454,7 +468,15 @@ async function closeStaleAutoOpenedTabs(statusBody, statusEndpoint, endpoint) {
     delete autoOpenedTabIds[tabId];
     closedCount += 1;
     if (meta?.origin && meta?.destination && meta?.date) {
-      const warned = await reportFlightWarning(endpoint, meta.origin, meta.destination, meta.date, "capture_timeout");
+      const warned = await reportFlightWarning(
+        endpoint,
+        meta.origin,
+        meta.destination,
+        meta.date,
+        "capture_timeout",
+        meta.taskKey || "",
+        meta.lastSuccessfulPollAt || ""
+      );
       if (warned) {
         warnedCount += 1;
       }
@@ -491,7 +513,7 @@ async function closeHourlyCleanupTabs(reason) {
   });
 }
 
-async function reportFlightWarning(endpoint, origin, destination, date, reason) {
+async function reportFlightWarning(endpoint, origin, destination, date, reason, taskKey = "", pollAt = "") {
   const warningEndpoint = deriveWarningEndpoint(endpoint);
   if (!warningEndpoint) {
     return false;
@@ -502,7 +524,14 @@ async function reportFlightWarning(endpoint, origin, destination, date, reason) 
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ origin, destination, date, reason })
+      body: JSON.stringify({
+        origin,
+        destination,
+        date,
+        reason,
+        auto_open_task_key: taskKey,
+        auto_open_poll_at: pollAt
+      })
     });
     return response.ok;
   } catch {
