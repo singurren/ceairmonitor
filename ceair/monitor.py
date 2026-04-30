@@ -1479,6 +1479,14 @@ class MonitorService:
         today = now_local().date()
         rules = effective_rules(config)
         rule_dates_by_name = {rule.name: rule_window_dates(rule, config, today) for rule in rules}
+        all_monitored_dates = sorted({date_text for dates in rule_dates_by_name.values() for date_text in dates})
+        if all_monitored_dates:
+            summary_start_date = all_monitored_dates[0]
+            summary_end_date = all_monitored_dates[-1]
+        else:
+            fallback_start = today + dt.timedelta(days=config.start_offset_days)
+            summary_start_date = fallback_start.isoformat()
+            summary_end_date = (fallback_start + dt.timedelta(days=config.days_ahead)).isoformat()
         route_results: list[dict[str, Any]] = []
         current_statuses: dict[str, str] = {}
         redeemable_dates: list[dict[str, Any]] = []
@@ -1541,8 +1549,6 @@ class MonitorService:
                         route_map[date_text] = status
                 chunk_start += dt.timedelta(days=7)
 
-            for date_text, status in sorted(route_map.items()):
-                current_statuses[f"{route_key}:{date_text}"] = status
             route_statuses[route_key] = dict(sorted(route_map.items()))
             route_results.append({"route": route_query["route"], "statuses": route_statuses[route_key]})
 
@@ -1552,6 +1558,7 @@ class MonitorService:
                     route_key = rule_route_query_key(rule, origin, destination)
                     rule_dates = rule_dates_by_name.get(rule.name, set())
                     for date_text, status in sorted(route_statuses.get(route_key, {}).items()):
+                        current_statuses[f"{rule.name}:{origin}-{destination}:{date_text}"] = status
                         if date_text not in rule_dates or status != "2" or not rule_matches_date(rule, date_text):
                             continue
                         match_item = {
@@ -1699,8 +1706,8 @@ class MonitorService:
 
         return {
             "window": {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
+                "start_date": summary_start_date,
+                "end_date": summary_end_date,
                 "days_ahead": config.days_ahead,
             },
             "rules": [rule.to_dict() for rule in rules],
@@ -1731,7 +1738,7 @@ class MonitorService:
             if item["requires_flight_level"]:
                 continue
             route_key = f"{item['origin']}-{item['destination']}"
-            key = f"{route_key}:{item['date']}"
+            key = f"{item['rule_name']}:{route_key}:{item['date']}"
             old_status = previous.get(key)
             if item["status"] == "2" and old_status != "2":
                 rule = rules_by_name.get(item["rule_name"])
