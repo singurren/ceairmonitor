@@ -195,7 +195,9 @@ uv sync --extra browser
 
 - `weekdays` 和 `specific_dates` 二选一或同时存在都可以；只要命中其中之一，这条规则就会参与当天匹配
 - 如果只想监控某几个一次性日期，可以把 `weekdays` 设为空数组，并填写 `specific_dates`
-- 如果 `specific_dates` 超出默认 `days_ahead` 查询窗口，服务会自动把本轮查询窗口扩展到最晚的指定日期
+- 每条规则可以单独配置 `window_start_date`、`start_offset_days` 和 `days_ahead`；没有配置时才使用全局窗口
+- 趣游卡这类周规则可以用 `window_start_date=2026-05-10` 加 `days_ahead=34` 表示从 `2026-05-10` 开始，之后每天按当前日期向后滚动 `35` 天
+- 行享东方这类固定日期段只需要填写 `specific_dates`；指定日期过期后会自然停止查询
 - `notification_group` 可用于把不同卡的通知发给不同 Server 酱 key；当前 `economy_coupon` 会读取 `economy_coupon_serverchan_sendkeys`
 - `query_extra_params` 会透传到日期级查询接口，国际行享东方卡需要 `ticketType=economyClass` 和 `mIsInter=1`
 - 没有 `start_time / end_time` 时，沿用日期级事件

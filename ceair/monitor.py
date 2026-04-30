@@ -160,6 +160,9 @@ class MonitorRule:
     specific_dates: list[str] = field(default_factory=list)
     card_name: str = "东航趣游卡"
     notification_group: str = "default"
+    window_start_date: str = ""
+    start_offset_days: int | None = None
+    days_ahead: int | None = None
     start_time: str = ""
     end_time: str = ""
     product_code: str = ""
@@ -182,6 +185,9 @@ class MonitorRule:
             specific_dates=[str(item).strip() for item in data.get("specific_dates", []) if str(item).strip()],
             card_name=str(data.get("card_name") or "东航趣游卡").strip() or "东航趣游卡",
             notification_group=str(data.get("notification_group") or "default").strip() or "default",
+            window_start_date=str(data.get("window_start_date") or "").strip(),
+            start_offset_days=int(data["start_offset_days"]) if data.get("start_offset_days") is not None else None,
+            days_ahead=int(data["days_ahead"]) if data.get("days_ahead") is not None else None,
             start_time=str(data.get("start_time") or "").strip(),
             end_time=str(data.get("end_time") or "").strip(),
             product_code=str(data.get("product_code") or "").strip(),
@@ -242,6 +248,12 @@ def validate_rule(rule: MonitorRule) -> None:
     rule.specific_dates = normalize_specific_dates(rule.specific_dates)
     if not rule.weekdays and not rule.specific_dates:
         raise ValueError(f"rule {rule.name} must define weekdays or specific_dates")
+    if rule.window_start_date:
+        dt.date.fromisoformat(rule.window_start_date)
+    if rule.start_offset_days is not None and rule.start_offset_days < 0:
+        raise ValueError(f"rule {rule.name} start_offset_days must be >= 0")
+    if rule.days_ahead is not None and rule.days_ahead < 0:
+        raise ValueError(f"rule {rule.name} days_ahead must be >= 0")
     if rule.start_time:
         parse_clock_time(rule.start_time)
     if rule.end_time:
@@ -298,6 +310,39 @@ def rule_matches_date(rule: MonitorRule, date_text: str) -> bool:
     if rule.weekdays and weekday_matches(date_text, rule.weekdays):
         return True
     return False
+
+
+def rule_window_dates(rule: MonitorRule, config: "AppConfig", today: dt.date) -> set[str]:
+    dates: set[str] = set()
+    if rule.specific_dates:
+        dates.update(date_text for date_text in rule.specific_dates if dt.date.fromisoformat(date_text) >= today)
+
+    if rule.weekdays:
+        start_offset_days = rule.start_offset_days if rule.start_offset_days is not None else config.start_offset_days
+        days_ahead = rule.days_ahead if rule.days_ahead is not None else config.days_ahead
+        start_date = today + dt.timedelta(days=start_offset_days)
+        if rule.window_start_date:
+            start_date = max(start_date, dt.date.fromisoformat(rule.window_start_date))
+        end_date = start_date + dt.timedelta(days=days_ahead)
+        dates.update(day.isoformat() for day in date_range(start_date, end_date))
+
+    return dates
+
+
+def rule_route_query_key(rule: MonitorRule, origin: str, destination: str) -> str:
+    extra_params = json.dumps(rule.query_extra_params, sort_keys=True, separators=(",", ":"))
+    return "|".join(
+        [
+            origin,
+            destination,
+            rule.product_code,
+            rule.route_type,
+            rule.index_no,
+            rule.channel_code,
+            rule.sales_channel,
+            extra_params,
+        ]
+    )
 
 
 def time_window_label(start_time: str, end_time: str) -> str:
@@ -1432,18 +1477,8 @@ class MonitorService:
 
     def _collect_summary(self, client: CeairClient, config: AppConfig) -> dict[str, Any]:
         today = now_local().date()
-        start_date = today + dt.timedelta(days=config.start_offset_days)
         rules = effective_rules(config)
-        end_date = start_date + dt.timedelta(days=config.days_ahead)
-        specific_dates = [
-            dt.date.fromisoformat(date_text)
-            for rule in rules
-            for date_text in rule.specific_dates
-            if dt.date.fromisoformat(date_text) >= start_date
-        ]
-        if specific_dates:
-            end_date = max(end_date, max(specific_dates))
-        monitored_dates = {day.isoformat(): day for day in date_range(start_date, end_date)}
+        rule_dates_by_name = {rule.name: rule_window_dates(rule, config, today) for rule in rules}
         route_results: list[dict[str, Any]] = []
         current_statuses: dict[str, str] = {}
         redeemable_dates: list[dict[str, Any]] = []
@@ -1459,9 +1494,12 @@ class MonitorService:
         for rule in rules:
             for origin in rule.origin_codes:
                 for destination in rule.destination_codes:
+                    route_label = f"{origin}-{destination}"
+                    query_key = rule_route_query_key(rule, origin, destination)
                     route_queries.setdefault(
-                        f"{origin}-{destination}",
+                        query_key,
                         {
+                            "route": route_label,
                             "origin": origin,
                             "destination": destination,
                             "product_code": rule.product_code,
@@ -1470,14 +1508,23 @@ class MonitorService:
                             "channel_code": rule.channel_code,
                             "sales_channel": rule.sales_channel,
                             "query_extra_params": rule.query_extra_params,
+                            "dates": set(rule_dates_by_name.get(rule.name, set())),
                         },
                     )
+                    route_queries[query_key]["dates"].update(rule_dates_by_name.get(rule.name, set()))
 
         route_statuses: dict[str, dict[str, str]] = {}
         for route_key, route_query in sorted(route_queries.items()):
             route_map: dict[str, str] = {}
-            chunk_start = start_date
-            while chunk_start <= end_date:
+            route_dates = sorted(route_query.get("dates") or [])
+            if not route_dates:
+                route_statuses[route_key] = {}
+                route_results.append({"route": route_query["route"], "statuses": {}})
+                continue
+            route_start = dt.date.fromisoformat(route_dates[0])
+            route_end = dt.date.fromisoformat(route_dates[-1])
+            chunk_start = route_start
+            while chunk_start <= route_end:
                 chunk_result = client.query_redeemable_dates(
                     chunk_start,
                     route_query["origin"],
@@ -1490,21 +1537,22 @@ class MonitorService:
                     route_query["query_extra_params"],
                 )
                 for date_text, status in chunk_result.items():
-                    if date_text in monitored_dates:
+                    if date_text in route_query["dates"]:
                         route_map[date_text] = status
                 chunk_start += dt.timedelta(days=7)
 
             for date_text, status in sorted(route_map.items()):
                 current_statuses[f"{route_key}:{date_text}"] = status
             route_statuses[route_key] = dict(sorted(route_map.items()))
-            route_results.append({"route": route_key, "statuses": route_statuses[route_key]})
+            route_results.append({"route": route_query["route"], "statuses": route_statuses[route_key]})
 
         for rule in rules:
             for origin in rule.origin_codes:
                 for destination in rule.destination_codes:
-                    route_key = f"{origin}-{destination}"
+                    route_key = rule_route_query_key(rule, origin, destination)
+                    rule_dates = rule_dates_by_name.get(rule.name, set())
                     for date_text, status in sorted(route_statuses.get(route_key, {}).items()):
-                        if status != "2" or not rule_matches_date(rule, date_text):
+                        if date_text not in rule_dates or status != "2" or not rule_matches_date(rule, date_text):
                             continue
                         match_item = {
                             "rule_name": rule.name,

@@ -53,6 +53,8 @@
       "weekdays": [
         1
       ],
+      "window_start_date": "2026-05-10",
+      "days_ahead": 34,
       "start_time": "00:00",
       "end_time": "09:40"
     },
@@ -67,6 +69,8 @@
       "weekdays": [
         4
       ],
+      "window_start_date": "2026-05-10",
+      "days_ahead": 34,
       "start_time": "16:00",
       "end_time": ""
     },
@@ -81,11 +85,14 @@
       "weekdays": [
         5
       ],
+      "window_start_date": "2026-05-10",
+      "days_ahead": 34,
       "start_time": "12:00",
       "end_time": ""
     },
     {
       "name": "返程 深圳到上海 2026-04-29 下午后",
+      "enabled": false,
       "origin_codes": [
         "SZX"
       ],
@@ -101,6 +108,7 @@
     },
     {
       "name": "去程 上海到深圳 2026-05-06 上午前",
+      "enabled": false,
       "origin_codes": [
         "SHA"
       ],
@@ -116,6 +124,7 @@
     },
     {
       "name": "返程 深圳到上海 2026-05-08 下午后",
+      "enabled": false,
       "origin_codes": [
         "SZX"
       ],
