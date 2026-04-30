@@ -353,6 +353,9 @@ function extractAutoOpenTasks(statusBody) {
     if (!item || item.status !== "2") {
       continue;
     }
+    if (item.requires_flight_level === false) {
+      continue;
+    }
     const origin = String(item.origin || "").toUpperCase();
     const destination = String(item.destination || "").toUpperCase();
     const date = String(item.date || "");

@@ -1132,6 +1132,8 @@ class MonitorService:
         for item in rule_matches:
             if not isinstance(item, dict) or item.get("status") != "2":
                 continue
+            if not item.get("requires_flight_level"):
+                continue
             origin = str(item.get("origin") or "").strip().upper()
             destination = str(item.get("destination") or "").strip().upper()
             date_text = str(item.get("date") or "").strip()
