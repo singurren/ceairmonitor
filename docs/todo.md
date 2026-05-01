@@ -1,6 +1,6 @@
 # TODO
 
-更新时间：`2026-04-17`
+更新时间：`2026-05-01`
 
 ## 当前优先级
 
@@ -26,15 +26,18 @@
   - 北京时间“今天”起
   - 包含今天在内总共 `14` 天
   - 因为代码按起止都包含计算，所以配置应为 `start_offset_days = 0`、`days_ahead = 13`
-- 确认每日去重状态重置时点为北京时间 `07:30`
-- 验证新的 WSL 常驻脚本是否符合 NAS 目标路径：
+- 已确认每日去重状态重置时点为北京时间 `07:00`
+- 已验证新的 WSL 常驻脚本符合当前 NAS/WSL 目标路径：
   - `/home/gurren/project/ceairmonitor`
   - `./scripts/ceair-daemon.sh start`
   - `.run/ceair-monitor.pid`
   - `.run/ceair-monitor.log`
-- 验证后台脚本优先走 `.venv/bin/ceair-monitor` 后，在当前本机 WSL 里不再受 `uv` cache 权限影响
+- 已验证后台脚本优先走 `.venv/bin/ceair-monitor`，当前实际进程命令为 `.venv/bin/python .../.venv/bin/ceair-monitor`
+- 已修复 `restart` 只 stop 不 start 的问题
+- 已修复当前命令会话退出后后台进程被清理的问题，启动命令已改为 `nohup setsid`
 - 验证当前机器上的 `install-wsl-boot.sh` / `uninstall-wsl-boot.sh` 是否能稳定写入和移除 `/etc/wsl.conf` 的 boot command
-- 验证 `.run/ceair-monitor.log` 是否已经稳定输出轻量运行日志，便于排查风控和插件回传问题
+- 已验证 `.run/ceair-monitor.log` 能稳定输出轻量运行日志，已用于定位 `2026-05-01 07:00` 未推送和 `10:51` 单次 `502` 问题
+- 继续观察 `502/504` 网关瞬断是否已不再产生单次误报；只有持续超过 `2` 小时才应推维护者提醒
 - 上线前创建本地私有通知密钥文件：
   - `data/secrets.local.json`
   - 仅保留 `serverchan_sendkeys`

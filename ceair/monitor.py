@@ -1392,12 +1392,69 @@ class MonitorService:
         ]
         return any(keyword in text for keyword in keywords)
 
+    def _is_transient_gateway_error(self, exc: Exception) -> bool:
+        if isinstance(exc, urllib.error.HTTPError):
+            return exc.code in {502, 504}
+        text = str(exc).lower()
+        return "bad gateway" in text or "gateway timeout" in text
+
+    def _handle_transient_gateway_error(
+        self,
+        exc: Exception,
+        notifier: ServerChanNotifier,
+    ) -> None:
+        now = now_local()
+        with self.lock:
+            poll_risk_tracker = dict(self.state.poll_risk_tracker)
+            first_seen_at = parse_iso_datetime(str(poll_risk_tracker.get("gateway_first_seen_at") or ""))
+            last_seen_at = parse_iso_datetime(str(poll_risk_tracker.get("gateway_last_seen_at") or ""))
+            last_reminded_at = parse_iso_datetime(str(poll_risk_tracker.get("gateway_last_reminded_at") or ""))
+            if last_seen_at and (now - last_seen_at).total_seconds() > CONTINUOUS_WARNING_REMINDER_SECONDS:
+                first_seen_at = None
+                last_reminded_at = None
+            if first_seen_at is None:
+                first_seen_at = now
+            poll_risk_tracker["gateway_first_seen_at"] = first_seen_at.isoformat()
+            poll_risk_tracker["gateway_last_seen_at"] = now.isoformat()
+            should_send_reminder = (
+                (now - first_seen_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
+                and (
+                    last_reminded_at is None
+                    or (now - last_reminded_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
+                )
+            )
+            if should_send_reminder:
+                poll_risk_tracker["gateway_last_reminded_at"] = now.isoformat()
+            self.state.poll_risk_tracker = poll_risk_tracker
+            self.state.save(self.state_path)
+
+        if not should_send_reminder:
+            return
+
+        title = "东航接口网关异常持续中"
+        body = "\n".join(
+            [
+                f"上游网关异常已持续至少 {CONTINUOUS_WARNING_REMINDER_SECONDS // 3600} 小时",
+                f"异常类型：{type(exc).__name__}",
+                str(exc),
+                "服务会继续按原间隔重试，请检查上游接口可用性。",
+            ]
+        )
+        try:
+            notifier.send(title, body)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _handle_poll_error(
         self,
         exc: Exception,
         notifier: ServerChanNotifier,
         config: AppConfig,
     ) -> None:
+        if self._is_transient_gateway_error(exc):
+            self._handle_transient_gateway_error(exc, notifier)
+            return
+
         if not self._is_rate_limited_error(exc):
             title = "东航兑换卡轮询异常"
             body = "\n".join(

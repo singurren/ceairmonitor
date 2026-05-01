@@ -287,9 +287,11 @@ wsl.exe --shutdown
 它会：
 
 - 优先用 `.venv/bin/ceair-monitor` 在后台启动服务；只有本地虚拟环境不存在时才回退到 `uv run ceair-monitor`
+- 使用 `nohup setsid` 启动，避免服务随当前终端或维护会话退出而被清理
 - 把进程号写到 `.run/ceair-monitor.pid`
 - 把日志写到 `.run/ceair-monitor.log`
 - 如果 PID 文件过期，但实际进程还活着，`status/start/stop` 会自动重新对齐 PID 文件
+- `restart` 会先停止旧进程，再重新执行 `start`
 - `.run/ceair-monitor.log` 现在会记录轻量运行日志：
   - 轮询开始 / 结束
   - 插件航班回传

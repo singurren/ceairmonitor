@@ -64,7 +64,7 @@ start_service() {
   fi
 
   rm -f "${PID_FILE}"
-  nohup "${CMD[@]}" >> "${LOG_FILE}" 2>&1 &
+  nohup setsid "${CMD[@]}" >> "${LOG_FILE}" 2>&1 &
   local pid=$!
   echo "${pid}" > "${PID_FILE}"
 
@@ -133,7 +133,24 @@ case "${1:-}" in
     stop_service
     ;;
   restart)
-    stop_service || true
+    if is_running; then
+      pid="$(read_pid)"
+      kill "${pid}" 2>/dev/null || true
+      for _ in {1..20}; do
+        if ! kill -0 "${pid}" 2>/dev/null; then
+          rm -f "${PID_FILE}"
+          echo "ceair-monitor stopped"
+          break
+        fi
+        sleep 0.5
+      done
+      if kill -0 "${pid}" 2>/dev/null; then
+        echo "ceair-monitor did not stop within timeout (pid ${pid})"
+        exit 1
+      fi
+    else
+      rm -f "${PID_FILE}"
+    fi
     start_service
     ;;
   status)
