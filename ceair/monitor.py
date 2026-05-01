@@ -1058,6 +1058,18 @@ class MonitorService:
         )
 
         with self.lock:
+            warning_prefix = f"{origin}-{destination}:{date_text}:"
+            previous_warning_keys = list(self.state.previous_warning_keys)
+            next_warning_keys = [key for key in previous_warning_keys if not key.startswith(warning_prefix)]
+            if len(next_warning_keys) != len(previous_warning_keys):
+                self.state.previous_warning_keys = sorted(next_warning_keys)
+                self.state.warning_tracker = {
+                    key: value
+                    for key, value in self.state.warning_tracker.items()
+                    if not key.startswith(warning_prefix)
+                }
+                if not self.state.previous_warning_keys and not self.state.poll_risk_tracker:
+                    self.state.effective_poll_interval_seconds = config.poll_interval_seconds
             self.state.previous_external_flight_keys = sorted(current_flight_keys)
             self.state.last_external_flight_result = result
             self.state.events.extend(events)
@@ -1172,9 +1184,12 @@ class MonitorService:
         last_escalated_at = parse_iso_datetime(str(warning_meta.get("last_escalated_at") or ""))
         warning_meta["first_seen_at"] = first_seen_at.isoformat()
         warning_meta["last_seen_at"] = now.isoformat()
-        should_send_initial = warning_key not in previous_warning_keys
+        is_soft_timeout = reason == "capture_timeout"
+        is_new_warning = warning_key not in previous_warning_keys
+        should_send_initial = is_new_warning and not is_soft_timeout
         should_send_escalation = (
             not should_send_initial
+            and not is_new_warning
             and (now - first_seen_at).total_seconds() >= CONTINUOUS_WARNING_REMINDER_SECONDS
             and (
                 last_escalated_at is None
@@ -1184,7 +1199,11 @@ class MonitorService:
 
         if not should_send_initial and not should_send_escalation:
             with self.lock:
-                self.state.effective_poll_interval_seconds = next_interval
+                current_warning_keys = set(self.state.previous_warning_keys)
+                current_warning_keys.add(warning_key)
+                self.state.previous_warning_keys = sorted(current_warning_keys)
+                if not is_soft_timeout:
+                    self.state.effective_poll_interval_seconds = next_interval
                 self.state.warning_tracker[warning_key] = warning_meta
                 self.state.save(self.state_path)
             batch_notification = self._mark_external_batch_completed(
@@ -1193,12 +1212,20 @@ class MonitorService:
                 ServerChanNotifier(normalize_sendkeys(config), config.request_timeout_seconds),
                 config,
             )
+            notification_reason = "soft_timeout_warning" if is_soft_timeout else "duplicate_warning"
+            log_runtime(
+                "external_warning_suppressed",
+                route=f"{origin}-{destination}",
+                date=date_text,
+                reason=reason,
+                notification_reason=notification_reason,
+            )
             return {
                 "accepted": True,
                 "reason": reason,
                 "date": date_text,
                 "route": f"{origin}-{destination}",
-                "notification": {"sent": False, "reason": "duplicate_warning"},
+                "notification": {"sent": False, "reason": notification_reason},
                 "batch_notification": batch_notification,
             }
 
