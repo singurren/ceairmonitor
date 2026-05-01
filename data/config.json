@@ -29,18 +29,6 @@
   "browser_user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
   "m_site_cookie": "",
   "m_site_extra_headers": {},
-  "playwright_headless": true,
-  "playwright_storage_state_path": "data/playwright-storage-state.json",
-  "playwright_timeout_ms": 45000,
-  "playwright_user_data_dir": "data/playwright-user-data",
-  "playwright_browser_channel": "",
-  "playwright_locale": "zh-CN",
-  "playwright_timezone_id": "Asia/Shanghai",
-  "playwright_viewport_width": 390,
-  "playwright_viewport_height": 844,
-  "playwright_is_mobile": true,
-  "playwright_has_touch": true,
-  "playwright_device_scale_factor": 3.0,
   "rules": [
     {
       "name": "去程 上海到深圳 周一上午",
@@ -88,54 +76,6 @@
       "window_start_date": "2026-05-10",
       "days_ahead": 34,
       "start_time": "12:00",
-      "end_time": ""
-    },
-    {
-      "name": "返程 深圳到上海 2026-04-29 下午后",
-      "enabled": false,
-      "origin_codes": [
-        "SZX"
-      ],
-      "destination_codes": [
-        "SHA"
-      ],
-      "weekdays": [],
-      "specific_dates": [
-        "2026-04-29"
-      ],
-      "start_time": "14:00",
-      "end_time": ""
-    },
-    {
-      "name": "去程 上海到深圳 2026-05-06 上午前",
-      "enabled": false,
-      "origin_codes": [
-        "SHA"
-      ],
-      "destination_codes": [
-        "SZX"
-      ],
-      "weekdays": [],
-      "specific_dates": [
-        "2026-05-06"
-      ],
-      "start_time": "",
-      "end_time": "09:30"
-    },
-    {
-      "name": "返程 深圳到上海 2026-05-08 下午后",
-      "enabled": false,
-      "origin_codes": [
-        "SZX"
-      ],
-      "destination_codes": [
-        "SHA"
-      ],
-      "weekdays": [],
-      "specific_dates": [
-        "2026-05-08"
-      ],
-      "start_time": "15:00",
       "end_time": ""
     },
     {

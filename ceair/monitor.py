@@ -410,18 +410,6 @@ class AppConfig:
     browser_user_agent: str = DEFAULT_BROWSER_USER_AGENT
     m_site_cookie: str = ""
     m_site_extra_headers: dict[str, str] = field(default_factory=dict)
-    playwright_headless: bool = True
-    playwright_storage_state_path: str = "data/playwright-storage-state.json"
-    playwright_timeout_ms: int = 45000
-    playwright_user_data_dir: str = "data/playwright-user-data"
-    playwright_browser_channel: str = ""
-    playwright_locale: str = "zh-CN"
-    playwright_timezone_id: str = "Asia/Shanghai"
-    playwright_viewport_width: int = 390
-    playwright_viewport_height: int = 844
-    playwright_is_mobile: bool = True
-    playwright_has_touch: bool = True
-    playwright_device_scale_factor: float = 3.0
     rules: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -756,18 +744,6 @@ class MonitorService:
             "browser_user_agent",
             "m_site_cookie",
             "m_site_extra_headers",
-            "playwright_headless",
-            "playwright_storage_state_path",
-            "playwright_timeout_ms",
-            "playwright_user_data_dir",
-            "playwright_browser_channel",
-            "playwright_locale",
-            "playwright_timezone_id",
-            "playwright_viewport_width",
-            "playwright_viewport_height",
-            "playwright_is_mobile",
-            "playwright_has_touch",
-            "playwright_device_scale_factor",
             "rules",
         }
         with self.lock:
@@ -832,44 +808,6 @@ class MonitorService:
         with self.lock:
             interval = self.state.effective_poll_interval_seconds or self.config.poll_interval_seconds
         return max(float(interval), 1.0)
-
-    def _build_browser_probe(self, config: AppConfig) -> Any:
-        try:
-            from ceair.browser import BrowserProbeConfig, PlaywrightFlightProbe
-        except ModuleNotFoundError as exc:
-            if exc.name == "playwright":
-                raise RuntimeError(
-                    "playwright is not installed; install optional browser support before using browser probe"
-                ) from exc
-            raise
-
-        return PlaywrightFlightProbe(
-            BrowserProbeConfig(
-                headless=config.playwright_headless,
-                user_agent=config.browser_user_agent,
-                storage_state_path=config.playwright_storage_state_path,
-                timeout_ms=config.playwright_timeout_ms,
-                user_data_dir=config.playwright_user_data_dir,
-                browser_channel=config.playwright_browser_channel,
-                locale=config.playwright_locale,
-                timezone_id=config.playwright_timezone_id,
-                viewport_width=config.playwright_viewport_width,
-                viewport_height=config.playwright_viewport_height,
-                is_mobile=config.playwright_is_mobile,
-                has_touch=config.playwright_has_touch,
-                device_scale_factor=config.playwright_device_scale_factor,
-            )
-        )
-
-    def _browser_probe(self, query: dict[str, Any], config: AppConfig) -> dict[str, Any]:
-        probe = self._build_browser_probe(config)
-        return probe.probe(
-            dep_date=dt.date.fromisoformat(query["date"]),
-            origin_code=query["origin"],
-            destination_code=query["destination"],
-            product_code=query["product_code"],
-            route_type=query["route_type"],
-        )
 
     def _normalize_http_flights(self, response: dict[str, Any]) -> list[dict[str, Any]]:
         normalized_flights = []
@@ -982,39 +920,6 @@ class MonitorService:
             "cookie_set": bool(self.config.m_site_cookie),
             "extra_header_keys": sorted(imported_headers.keys()),
         }
-
-    def run_browser_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
-        with self.lock:
-            config = self.config
-
-        date_text = str(payload.get("date") or "").strip()
-        if not date_text:
-            raise ValueError("missing date")
-        rules = effective_rules(config)
-        default_rule = rules[0] if rules else None
-        origin = str(payload.get("origin") or "").strip() or (
-            default_rule.origin_codes[0] if default_rule and default_rule.origin_codes else ""
-        )
-        destination = str(payload.get("destination") or "").strip() or (
-            default_rule.destination_codes[0] if default_rule and default_rule.destination_codes else ""
-        )
-        if not origin or not destination:
-            raise ValueError("missing origin or destination")
-        product_code = str(payload.get("product_code") or "").strip() or (
-            default_rule.product_code if default_rule else config.product_code
-        )
-        route_type = str(payload.get("route_type") or "").strip() or (
-            default_rule.route_type if default_rule else config.route_type
-        )
-
-        probe = self._build_browser_probe(config)
-        return probe.probe(
-            dep_date=dt.date.fromisoformat(date_text),
-            origin_code=origin,
-            destination_code=destination,
-            product_code=product_code,
-            route_type=route_type,
-        )
 
     def submit_external_flight_result(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -1683,28 +1588,16 @@ class MonitorService:
                         query["sales_channel"],
                     )
                 except Exception as exc:  # noqa: BLE001
-                    response = None
-                    source = "browser"
-                    try:
-                        browser_report = self._browser_probe(query, config)
-                    except Exception as browser_exc:  # noqa: BLE001
-                        flight_level["status"] = "error"
-                        flight_level["error"] = {
-                            "date": query["date"],
-                            "route": route_key,
-                            "message": f"browser probe failed: {browser_exc}",
-                        }
-                        flight_level["sources_by_date"][attempt_key] = {
-                            "source": source,
-                            "status": "failed",
-                            "message": str(browser_exc),
-                        }
-                        continue
-
-                    browser_status = browser_report.get("status", "not_observed")
+                    flight_level["status"] = "waf_blocked" if isinstance(exc, WafBlockedError) else "error"
+                    flight_level["error"] = {
+                        "date": query["date"],
+                        "route": route_key,
+                        "message": str(exc),
+                    }
                     flight_level["sources_by_date"][attempt_key] = {
                         "source": source,
-                        "status": browser_status,
+                        "status": "failed",
+                        "message": str(exc),
                     }
                     if isinstance(exc, WafBlockedError):
                         flight_level["blocked"] = {
@@ -1713,18 +1606,6 @@ class MonitorService:
                             "message": str(exc),
                             "details": exc.details,
                         }
-                    if browser_status == "waf_blocked":
-                        flight_level["status"] = "waf_blocked"
-                    elif browser_status in {"timeout", "not_observed"}:
-                        flight_level["status"] = "error"
-                        flight_level["error"] = {
-                            "date": query["date"],
-                            "route": route_key,
-                            "message": f"browser probe {browser_status}",
-                        }
-                    if browser_report.get("flights"):
-                        flight_level["flights_by_date"][attempt_key] = browser_report["flights"]
-                        flight_level["sources_by_date"][attempt_key]["flight_count"] = len(browser_report["flights"])
                     continue
 
                 normalized_flights = self._normalize_http_flights(response)
@@ -2046,18 +1927,17 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
                 {
                     "message": "Ceair monitor service",
                     "endpoints": [
-                    "GET /api/config",
-                    "PATCH /api/config",
-                    "GET /api/status",
-                    "POST /api/poll",
-                    "POST /api/test-notify",
-                    "POST /api/flight-result",
-                    "POST /api/flight-warning",
-                    "POST /api/import-flight-curl",
-                    "POST /api/browser-probe",
-                    "GET /prototype/index.html",
-                    "GET /docs/spec.md",
-                ],
+                        "GET /api/config",
+                        "PATCH /api/config",
+                        "GET /api/status",
+                        "POST /api/poll",
+                        "POST /api/test-notify",
+                        "POST /api/flight-result",
+                        "POST /api/flight-warning",
+                        "POST /api/import-flight-curl",
+                        "GET /prototype/index.html",
+                        "GET /docs/spec.md",
+                    ],
                 },
             )
             return
@@ -2122,22 +2002,6 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except ValueError as exc:
                 self._json(400, {"error": str(exc)})
-                return
-            self._json(200, result)
-            return
-        if self.path == "/api/browser-probe":
-            length = int(self.headers.get("Content-Length", "0"))
-            try:
-                payload = json.loads(self.rfile.read(length).decode() or "{}")
-                result = self.service.run_browser_probe(payload)
-            except json.JSONDecodeError:
-                self._json(400, {"error": "invalid json"})
-                return
-            except ValueError as exc:
-                self._json(400, {"error": str(exc)})
-                return
-            except Exception as exc:  # noqa: BLE001
-                self._json(500, {"error": str(exc)})
                 return
             self._json(200, result)
             return

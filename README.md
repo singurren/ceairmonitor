@@ -1,30 +1,31 @@
 # ceair
 
-东航趣游卡日期级放票监控服务。
+东航趣游卡放票监控服务。
 
-当前版本已经接入东航网页接口，可监控：
+当前正式运行链路是：
+
+1. `WSL`/NAS 后台服务轮询东航日期级接口
+2. 日期级命中后，服务记录待补查日期
+3. `Windows Chrome` 扩展在真实浏览器环境里自动打开航班页
+4. 扩展抓取航班列表并回传 `POST /api/flight-result`
+5. 服务端按 `rules` 中的起飞时间窗口过滤并推送新命中航班
+
+当前可监控：
 
 - 指定 `product_code`
 - 指定出发地 / 目的地
-- 从今天开始的未来一段时间，默认 `14` 天
-- 指定星期，默认 `周日 + 周一`
-- 当某天状态从不可兑变为可兑时发送提醒
-- 对配置了时间窗口的规则，自动确认是否出现命中窗口的起飞航班
-
-另外已经补上“航班级接口探测”骨架：
-
-- 仅对已可兑日期尝试拉取航班列表
-- 当前默认关闭
-- 如果命中阿里云 WAF，会把阻断状态写进 `last_summary.flight_level`
-- 不会影响日期级监控继续运行
+- 从指定日期开始的一段窗口
+- 指定星期或指定日期
+- 不同兑换卡和通知组
+- 配置了 `start_time / end_time` 的航班级时间窗口
 
 ## 主要文件
 
-- [main.py](/home/gurren/project/ceair/main.py)
-- [chrome-extension/README.md](/home/gurren/project/ceair/chrome-extension/README.md)
-- [data/config.json](/home/gurren/project/ceair/data/config.json)
-- [docs/spec.md](/home/gurren/project/ceair/docs/spec.md)
-- [prototype/index.html](/home/gurren/project/ceair/prototype/index.html)
+- [main.py](/home/gurren/project/ceairmonitor/main.py)
+- [chrome-extension/README.md](/home/gurren/project/ceairmonitor/chrome-extension/README.md)
+- [data/config.json](/home/gurren/project/ceairmonitor/data/config.json)
+- [docs/spec.md](/home/gurren/project/ceairmonitor/docs/spec.md)
+- [prototype/index.html](/home/gurren/project/ceairmonitor/prototype/index.html)
 
 ## 运行
 
@@ -32,13 +33,7 @@
 uv run ceair-monitor
 ```
 
-默认 `uv sync` 只安装日期级服务所需依赖，不包含 `playwright`。
-
-如果你后面确实要启用浏览器探针，再安装可选浏览器依赖：
-
-```bash
-uv sync --extra browser
-```
+服务运行只依赖 Python 标准库，`uv sync` 不需要安装额外运行依赖。
 
 启动后可访问：
 
@@ -46,7 +41,6 @@ uv sync --extra browser
 - `GET /api/config`
 - `PATCH /api/config`
 - `POST /api/poll`
-- `POST /api/browser-probe`
 - `POST /api/flight-result`
 
 默认地址：
@@ -55,7 +49,7 @@ uv sync --extra browser
 
 ## 配置
 
-默认配置在 [data/config.json](/home/gurren/project/ceair/data/config.json)。
+默认配置在 [data/config.json](/home/gurren/project/ceairmonitor/data/config.json)。
 
 关键字段：
 
@@ -73,22 +67,6 @@ uv sync --extra browser
 - `max_poll_interval_seconds`
 - `serverchan_sendkeys`
 - `notifications_enabled`
-- `flight_level_enabled`
-- `browser_user_agent`
-- `m_site_cookie`
-- `m_site_extra_headers`
-- `playwright_headless`
-- `playwright_storage_state_path`
-- `playwright_timeout_ms`
-- `playwright_user_data_dir`
-- `playwright_browser_channel`
-- `playwright_locale`
-- `playwright_timezone_id`
-- `playwright_viewport_width`
-- `playwright_viewport_height`
-- `playwright_is_mobile`
-- `playwright_has_touch`
-- `playwright_device_scale_factor`
 - `rules`
 
 说明：
@@ -100,33 +78,6 @@ uv sync --extra browser
   触发疑似风控后，每次增加多少秒，默认 `300`
 - `max_poll_interval_seconds`
   轮询间隔最大增加到多少秒，默认 `1800`
-- `flight_level_enabled`
-  是否尝试拉取航班级列表，默认 `false`
-  开启后会先尝试直连 `shoppingv2`，若命中 WAF 或直连失败，会自动回退到 Playwright 浏览器态探测
-- `browser_user_agent`
-  请求东航 `m.ceair.com` 航班列表接口时使用的浏览器 UA
-- `m_site_cookie`
-  可选。浏览器态的 `Cookie` 字符串；如果后续要绕过纯服务端请求被 WAF 拦截，通常需要它
-- `m_site_extra_headers`
-  可选。浏览器网络请求里复制出来的额外请求头，例如 `sec-ch-ua`、`priority`、`referer`
-- `playwright_headless`
-  Playwright 是否使用无头浏览器，默认 `true`
-- `playwright_storage_state_path`
-  Playwright 会话状态文件路径。仅作为降级兼容；长期运行更建议使用持久化用户目录
-- `playwright_timeout_ms`
-  浏览器探针默认超时，默认 `45000`
-- `playwright_user_data_dir`
-  Playwright 持久化浏览器目录。面向 VPS 长期运行时，优先复用这套 profile，而不是每次新建临时上下文
-- `playwright_browser_channel`
-  可选。系统已安装 Chrome/Chromium 时可指定 channel，例如 `chrome`；留空则使用 Playwright 自带 Chromium
-- `playwright_locale`
-- `playwright_timezone_id`
-- `playwright_viewport_width`
-- `playwright_viewport_height`
-- `playwright_is_mobile`
-- `playwright_has_touch`
-- `playwright_device_scale_factor`
-  这组参数用于让浏览器上下文更接近移动端 H5 场景，减少与真人设备的环境差异
 - `rules`
   可选。正式的多规则配置；如果为空，服务仍按旧的 `origin_codes + destination_codes + weekdays` 兼容运行
 - 持久化去重状态
@@ -155,7 +106,7 @@ uv sync --extra browser
       "origin_codes": ["SHA"],
       "destination_codes": ["SZX"],
       "weekdays": [1],
-      "start_time": "07:30",
+      "start_time": "00:00",
       "end_time": "09:40"
     },
     {
@@ -201,7 +152,7 @@ uv sync --extra browser
 - `notification_group` 可用于把不同卡的通知发给不同 Server 酱 key；当前 `economy_coupon` 会读取 `economy_coupon_serverchan_sendkeys`
 - `query_extra_params` 会透传到日期级查询接口，国际行享东方卡需要 `ticketType=economyClass` 和 `mIsInter=1`
 - 没有 `start_time / end_time` 时，沿用日期级事件
-- 配了时间窗口时，只有航班级探测拿到命中航班后才发通知
+- 配了时间窗口时，只有 Chrome 扩展回传航班且命中窗口后才发通知
 - 航班级事件主键现在是：`rule + route + date + flight_no + dep_time`
 
 ## HTTP 修改配置示例
@@ -232,7 +183,7 @@ curl -X POST http://127.0.0.1:8766/api/poll
 
 如果你在 `Windows + WSL` 环境里部署，而 `systemd`/`systemctl` 不稳定或不可用，当前仓库已经提供了一个不依赖 `systemd` 的后台脚本：
 
-- [scripts/ceair-daemon.sh](/home/gurren/project/ceair/scripts/ceair-daemon.sh)
+- [scripts/ceair-daemon.sh](/home/gurren/project/ceairmonitor/scripts/ceair-daemon.sh)
 
 先给它执行权限：
 
@@ -261,7 +212,7 @@ chmod +x ./scripts/install-wsl-boot.sh ./scripts/uninstall-wsl-boot.sh
 
 ```ini
 [boot]
-command = bash -lc 'cd /home/gurren/project/ceair && ./scripts/ceair-daemon.sh start'
+command = bash -lc 'cd /home/gurren/project/ceairmonitor && ./scripts/ceair-daemon.sh start'
 ```
 
 写完后，需要在 Windows 侧执行一次：
@@ -315,31 +266,9 @@ wsl.exe -d <你的发行版名> --cd /home/gurren/project/ceairmonitor bash -lc 
 - `install-wsl-boot.sh` 解决的是“WSL 实例被拉起后，服务自动起来”
 - 如果你还希望开机后自动拉起整台 `WSL`，仍然要靠 Windows 任务计划程序去调用 `wsl.exe`
 
-从 Chrome DevTools 导入一条成功的 `shoppingv2` cURL，请求头和 Cookie 会自动写入配置：
+## 航班结果回传
 
-```bash
-curl -X POST http://127.0.0.1:8766/api/import-flight-curl \
-  -H 'Content-Type: application/json' \
-  -d '{"curl":"curl '\''https://m.ceair.com/m-base/sale/shoppingv2'\'' -H '\''cookie: ...'\'' -H '\''user-agent: ...'\'' --data-raw '\''{...}'\''"}'
-```
-
-触发一次 Playwright 浏览器探针：
-
-```bash
-curl -X POST http://127.0.0.1:8766/api/browser-probe \
-  -H 'Content-Type: application/json' \
-  -d '{"date":"2026-05-08","origin":"SHA","destination":"SZX"}'
-```
-
-这个接口当前用于验证：
-
-- 无头浏览器能否打开东航航班列表页
-- 页面是否立刻进入验证码 / WAF 状态
-- 浏览器上下文里是否能观察到 `shoppingv2` 响应
-
-常规轮询里，如果某条规则配置了 `start_time` 或 `end_time`，服务也会自动复用同一套 Playwright 探测逻辑做二级确认。
-
-如果后续改成由 Windows Chrome 插件或本地 agent 回传航班列表，可调用：
+航班级补查由 `Windows Chrome` 扩展在真实浏览器环境里完成。扩展抓到航班列表后调用：
 
 ```bash
 curl -X POST http://127.0.0.1:8766/api/flight-result \
@@ -362,86 +291,17 @@ curl -X POST http://127.0.0.1:8766/api/flight-result \
 - 只对新出现的命中航班生成事件
 - 复用现有 `Server酱` 通知链路
 
-浏览器探针的会话优先级现在是：
-
-1. `playwright_user_data_dir` 中已有持久化 profile 时，优先复用它
-2. 否则如果 `playwright_storage_state_path` 存在，则使用 storage state
-3. 否则新建一次性浏览器上下文
-
-对未来 VPS 部署，更推荐：
-
-- 固定 `playwright_user_data_dir`
-- 尽量使用系统 Chrome channel，而不是每次都用 Playwright bundled Chromium
-- 保持 `locale / timezone / viewport / touch` 与目标使用环境一致
-
-## Playwright 会话准备
-
-当前推荐先在本机浏览器态跑通，再考虑 VPS。
-
-项目里现在已经提供了一个会话保存脚本：
-
-```bash
-uv run ceair-save-state --target-url https://m.ceair.com/
-```
-
-如果你刚改完依赖或脚本入口，还没同步环境，先执行一次：
-
-```bash
-uv sync
-```
-
-如果你需要运行 `ceair-save-state` 或 `POST /api/browser-probe`，要改成：
-
-```bash
-uv sync --extra browser
-```
-
-如果不想依赖 script 入口，也可以直接用模块方式：
-
-```bash
-uv run python -m ceair.browser --target-url https://m.ceair.com/
-```
-
-默认会：
-
-- 打开一个带持久化 profile 的 Playwright 浏览器
-- 进入你指定的页面
-- 等你手动完成验证或登录
-- 终端回车后保存到 `data/playwright-storage-state.json`
-
-可选参数：
-
-- `--output`
-- `--user-agent`
-- `--headless`
-- `--timeout-ms`
-- `--target-url`
-- `--user-data-dir`
-- `--browser-channel`
-- `--locale`
-- `--timezone-id`
-- `--viewport-width`
-- `--viewport-height`
-- `--no-mobile`
-- `--no-touch`
-- `--device-scale-factor`
-
-注意：
-
-- 如果你的环境没有桌面能力，不要用 `--headless` 去做这一步，因为手动验证通常需要可见浏览器
-- 更现实的做法是在本机先生成 `storage state`，再复制到服务器使用
-
 ## Server酱通知
 
 当前已经内置 `Server酱` 通知适配器。
 
-密钥不再放在主配置 [data/config.json](/home/gurren/project/ceair/data/config.json) 里，而是单独放在本地私有文件：
+密钥不再放在主配置 [data/config.json](/home/gurren/project/ceairmonitor/data/config.json) 里，而是单独放在本地私有文件：
 
-- [data/secrets.local.json](/home/gurren/project/ceair/data/secrets.local.json)
+- [data/secrets.local.json](/home/gurren/project/ceairmonitor/data/secrets.local.json)
 
 仓库里提供了示例文件：
 
-- [data/secrets.example.json](/home/gurren/project/ceair/data/secrets.example.json)
+- [data/secrets.example.json](/home/gurren/project/ceairmonitor/data/secrets.example.json)
 
 推荐写法：
 
@@ -509,23 +369,25 @@ yyyy-mm-dd 周x ;出发地 -> 目的地
 
 ## 当前边界
 
-现在的监控是“日期级”，不是“具体航班级”。
+当前监控已经不是单纯“日期级提醒”，而是“日期级筛选 + 真实浏览器航班级确认”。
 
-也就是说它能告诉你：
+服务端能稳定完成：
 
-- `2026-04-26` 可兑了
+- 日期级可兑状态轮询
+- 多规则匹配
+- 航班级事件去重
+- 通知分组与推送
+- 风控/异常告警
 
-但还不能告诉你：
+航班号和起飞时间依赖 `Windows Chrome` 扩展回传。只要扩展能正常打开页面并回传航班列表，服务就能告诉你：
 
-- 具体是哪一班 `MUxxxx`
-- 余位多少
-- 税费多少
+- 哪个日期命中
+- 哪个方向命中
+- 哪些航班号和起飞时间命中规则窗口
 
-已经验证到的最新事实是：
+当前不做：
 
-- 航班列表页真实调用的是 `https://m.ceair.com/m-base/sale/shoppingv2`
-- 纯 HTTP 轮询容易命中阿里云 WAF 验证页
-- 所以当前版本只能把航班级探测做成“可选尝试 + WAF 识别 + 状态落盘”
-- 当前新增了一个过渡方案：可把浏览器里成功请求 `shoppingv2` 的 cURL 导入服务，复用其中的 Cookie、UA 和关键请求头
-- 真正稳定拿到航班号/起飞时间，大概率仍需要浏览器态上下文，后续再视情况升级到自动化浏览器
-- 当前已经加入了一个 Playwright 浏览器探针骨架，用于验证“日期级触发后，再用浏览器态做航班级确认”这条路线
+- 自动兑换
+- 余位数量精确监控
+- 税费监控
+- 服务端绕过东航 WAF
