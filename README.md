@@ -41,6 +41,8 @@ uv run ceair-monitor
 - `GET /api/config`
 - `PATCH /api/config`
 - `POST /api/poll`
+- `POST /api/maintenance-report`
+- `POST /api/test-notify`
 - `POST /api/flight-result`
 
 默认地址：
@@ -178,6 +180,14 @@ curl -X PATCH http://127.0.0.1:8766/api/config \
 ```bash
 curl -X POST http://127.0.0.1:8766/api/poll
 ```
+
+立即向维护者推送一条系统自检：
+
+```bash
+curl -X POST http://127.0.0.1:8766/api/maintenance-report
+```
+
+这个接口会使用最近一次轮询状态生成“东航趣游卡系统自检”正文，并发送到 `maintainer_serverchan_sendkeys`。它不受每日 `12:00` 自动自检只发送一次的限制，也不会改写自动自检的当天发送记录。
 
 ## WSL 后台常驻
 
@@ -337,6 +347,7 @@ curl -X POST http://127.0.0.1:8766/api/flight-result \
 - `maintainer_serverchan_sendkeys`
   仅用于维护者通知，不参与普通放票业务通知
 - 服务会在每天北京时间 `12:00` 之后首次轮询时，向 `maintainer_serverchan_sendkeys` 发送一条系统自检消息
+- 如需临时补发维护者自检，可调用 `POST /api/maintenance-report`
 - 航班补查风控告警、轮询触发疑似风控后的策略调整提醒、以及“持续 `2` 小时仍异常”的升级提醒，也都只发送给 `maintainer_serverchan_sendkeys`
 
 当前航班级通知正文格式统一为：

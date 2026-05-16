@@ -1895,6 +1895,39 @@ class MonitorService:
                 return None
             state_snapshot = asdict(self.state)
 
+        notification = self._send_maintenance_report(
+            summary,
+            state_snapshot,
+            notifier,
+            event="maintenance_report",
+        )
+
+        with self.lock:
+            self.state.last_maintenance_report_date = report_date
+            self.state.save(self.state_path)
+        return notification
+
+    def send_maintenance_report_now(self) -> dict[str, Any]:
+        with self.lock:
+            config = self.config
+            notifier = ServerChanNotifier(normalize_maintainer_sendkeys(config), config.request_timeout_seconds)
+            state_snapshot = asdict(self.state)
+            summary = dict(self.state.last_summary or {})
+        return self._send_maintenance_report(
+            summary,
+            state_snapshot,
+            notifier,
+            event="manual_maintenance_report",
+        )
+
+    def _send_maintenance_report(
+        self,
+        summary: dict[str, Any],
+        state_snapshot: dict[str, Any],
+        notifier: ServerChanNotifier,
+        event: str,
+    ) -> dict[str, Any]:
+        report_date = now_local().date().isoformat()
         title = "东航趣游卡系统自检"
         redeemable_dates = summary.get("redeemable_dates", [])
         last_external = state_snapshot.get("last_external_flight_result") or {}
@@ -1913,17 +1946,13 @@ class MonitorService:
         )
         notification = notifier.send(title, body)
         log_runtime(
-            "maintenance_report",
+            event,
             sent=notification.get("sent"),
             success_count=notification.get("success_count"),
             total_count=notification.get("total_count"),
             redeemable_dates=len(redeemable_dates),
             recent_warning_count=len(state_snapshot.get("previous_warning_keys") or []),
         )
-
-        with self.lock:
-            self.state.last_maintenance_report_date = report_date
-            self.state.save(self.state_path)
         return notification
 
 
@@ -1958,6 +1987,7 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
                         "PATCH /api/config",
                         "GET /api/status",
                         "POST /api/poll",
+                        "POST /api/maintenance-report",
                         "POST /api/test-notify",
                         "POST /api/flight-result",
                         "POST /api/flight-warning",
@@ -1974,6 +2004,14 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/poll":
             self.service.request_poll()
             self._json(202, {"queued": True})
+            return
+        if self.path == "/api/maintenance-report":
+            try:
+                result = self.service.send_maintenance_report_now()
+            except Exception as exc:  # noqa: BLE001
+                self._json(500, {"error": str(exc)})
+                return
+            self._json(200, result)
             return
         if self.path == "/api/test-notify":
             try:
