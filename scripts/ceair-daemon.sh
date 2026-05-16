@@ -47,26 +47,36 @@ find_running_pid() {
   return 1
 }
 
+write_pid_file() {
+  local pid="$1"
+  if ! { echo "${pid}" > "${PID_FILE}"; } 2>/dev/null; then
+    echo "warning: cannot write pid file: ${PID_FILE}" >&2
+  fi
+}
+
 is_running() {
   local pid
   pid="$(find_running_pid || true)"
   if [[ -z "${pid}" ]]; then
     return 1
   fi
-  echo "${pid}" > "${PID_FILE}"
+  write_pid_file "${pid}"
   return 0
 }
 
 start_service() {
-  if is_running; then
-    echo "ceair-monitor is already running (pid $(read_pid))"
+  local pid
+  pid="$(find_running_pid || true)"
+  if [[ -n "${pid}" ]]; then
+    write_pid_file "${pid}"
+    echo "ceair-monitor is already running (pid ${pid})"
     exit 0
   fi
 
   rm -f "${PID_FILE}"
   nohup setsid "${CMD[@]}" >> "${LOG_FILE}" 2>&1 &
-  local pid=$!
-  echo "${pid}" > "${PID_FILE}"
+  pid=$!
+  write_pid_file "${pid}"
 
   for _ in {1..30}; do
     if ! kill -0 "${pid}" 2>/dev/null; then
@@ -87,19 +97,20 @@ start_service() {
 }
 
 stop_service() {
-  if ! is_running; then
+  local pid
+  pid="$(find_running_pid || true)"
+  if [[ -z "${pid}" ]]; then
     echo "ceair-monitor is not running"
-    rm -f "${PID_FILE}"
+    rm -f "${PID_FILE}" 2>/dev/null || true
     exit 0
   fi
 
-  local pid
-  pid="$(read_pid)"
+  write_pid_file "${pid}"
   kill "${pid}" 2>/dev/null || true
 
   for _ in {1..20}; do
     if ! kill -0 "${pid}" 2>/dev/null; then
-      rm -f "${PID_FILE}"
+      rm -f "${PID_FILE}" 2>/dev/null || true
       echo "ceair-monitor stopped"
       exit 0
     fi
@@ -111,8 +122,11 @@ stop_service() {
 }
 
 show_status() {
-  if is_running; then
-    echo "ceair-monitor is running (pid $(read_pid))"
+  local pid
+  pid="$(find_running_pid || true)"
+  if [[ -n "${pid}" ]]; then
+    write_pid_file "${pid}"
+    echo "ceair-monitor is running (pid ${pid})"
     echo "log: ${LOG_FILE}"
     exit 0
   fi
@@ -133,12 +147,13 @@ case "${1:-}" in
     stop_service
     ;;
   restart)
-    if is_running; then
-      pid="$(read_pid)"
+    pid="$(find_running_pid || true)"
+    if [[ -n "${pid}" ]]; then
+      write_pid_file "${pid}"
       kill "${pid}" 2>/dev/null || true
       for _ in {1..20}; do
         if ! kill -0 "${pid}" 2>/dev/null; then
-          rm -f "${PID_FILE}"
+          rm -f "${PID_FILE}" 2>/dev/null || true
           echo "ceair-monitor stopped"
           break
         fi
@@ -149,7 +164,7 @@ case "${1:-}" in
         exit 1
       fi
     else
-      rm -f "${PID_FILE}"
+      rm -f "${PID_FILE}" 2>/dev/null || true
     fi
     start_service
     ;;
