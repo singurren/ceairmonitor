@@ -20,10 +20,20 @@ read_pid() {
   fi
 }
 
+process_exists() {
+  local pid="$1"
+  [[ -n "${pid}" ]] && ps -p "${pid}" >/dev/null 2>&1
+}
+
+terminate_pid() {
+  local pid="$1"
+  kill -- "-${pid}" 2>/dev/null || kill "${pid}" 2>/dev/null
+}
+
 find_running_pid() {
   local pid
   pid="$(read_pid)"
-  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+  if process_exists "${pid}"; then
     printf '%s\n' "${pid}"
     return 0
   fi
@@ -79,7 +89,7 @@ start_service() {
   write_pid_file "${pid}"
 
   for _ in {1..30}; do
-    if ! kill -0 "${pid}" 2>/dev/null; then
+    if ! process_exists "${pid}"; then
       break
     fi
     if curl -fsS "${HEALTHCHECK_URL}" >/dev/null 2>&1; then
@@ -106,10 +116,13 @@ stop_service() {
   fi
 
   write_pid_file "${pid}"
-  kill "${pid}" 2>/dev/null || true
+  if ! terminate_pid "${pid}"; then
+    echo "ceair-monitor is running but could not be stopped (pid ${pid}); try: sudo kill ${pid}" >&2
+    exit 1
+  fi
 
   for _ in {1..20}; do
-    if ! kill -0 "${pid}" 2>/dev/null; then
+    if ! process_exists "${pid}"; then
       rm -f "${PID_FILE}" 2>/dev/null || true
       echo "ceair-monitor stopped"
       exit 0
@@ -150,9 +163,12 @@ case "${1:-}" in
     pid="$(find_running_pid || true)"
     if [[ -n "${pid}" ]]; then
       write_pid_file "${pid}"
-      kill "${pid}" 2>/dev/null || true
+      if ! terminate_pid "${pid}"; then
+        echo "ceair-monitor is running but could not be stopped (pid ${pid}); try: sudo kill ${pid}" >&2
+        exit 1
+      fi
       for _ in {1..20}; do
-        if ! kill -0 "${pid}" 2>/dev/null; then
+        if ! process_exists "${pid}"; then
           rm -f "${PID_FILE}" 2>/dev/null || true
           echo "ceair-monitor stopped"
           break
