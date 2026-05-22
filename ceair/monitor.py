@@ -76,6 +76,21 @@ def route_label(origin: str, destination: str) -> str:
     return f"{city_label(origin)} -> {city_label(destination)}"
 
 
+def format_flight_notification_section(
+    date_text: str,
+    origin: str,
+    destination: str,
+    flights: list[tuple[str, str]],
+) -> str:
+    flight_lines = [f" - {dep_time}，{flight_no}" for dep_time, flight_no in sorted(set(flights))]
+    return "\n\n".join(
+        [
+            f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
+            *flight_lines,
+        ]
+    )
+
+
 def log_runtime(event: str, **fields: Any) -> None:
     payload = {
         "ts": now_local().isoformat(),
@@ -1796,17 +1811,15 @@ class MonitorService:
             title = f"{card_name}命中目标航班"
             route_sections: dict[tuple[str, str], list[str]] = {}
             for date_text, origin, destination in sorted(flight_groups, key=lambda item: (item[1], item[2], item[0])):
-                flights = sorted(set(flight_groups[(date_text, origin, destination)]))
-                flight_line = "； ".join(f"{dep_time}，{flight_no}" for dep_time, flight_no in flights)
                 route_sections.setdefault((origin, destination), []).append(
-                    "\n".join(
-                        [
-                            f"{date_text} {weekday_label(date_text)} ;{route_label(origin, destination)}",
-                            flight_line,
-                        ]
+                    format_flight_notification_section(
+                        date_text,
+                        origin,
+                        destination,
+                        flight_groups[(date_text, origin, destination)],
                     )
                 )
-            body = "\n\n".join("\n".join(route_sections[route]) for route in sorted(route_sections))
+            body = "\n\n\n\n".join("\n\n\n\n".join(route_sections[route]) for route in sorted(route_sections))
         else:
             route_sections: dict[tuple[str, str], list[str]] = {}
             for date_text, origin, destination in sorted(date_groups, key=lambda item: (item[1], item[2], item[0])):
