@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import http.server
 import json
 import re
@@ -1342,8 +1343,31 @@ class MonitorService:
     def _is_transient_gateway_error(self, exc: Exception) -> bool:
         if isinstance(exc, urllib.error.HTTPError):
             return exc.code in {502, 504}
+        if isinstance(exc, urllib.error.URLError):
+            reason = exc.reason
+            if isinstance(reason, (ConnectionResetError, TimeoutError)):
+                return True
+            if isinstance(reason, OSError):
+                return reason.errno in {
+                    errno.ECONNABORTED,
+                    errno.ECONNRESET,
+                    errno.ETIMEDOUT,
+                    errno.EHOSTUNREACH,
+                    errno.ENETUNREACH,
+                }
         text = str(exc).lower()
-        return "bad gateway" in text or "gateway timeout" in text
+        return any(
+            keyword in text
+            for keyword in (
+                "bad gateway",
+                "gateway timeout",
+                "connection reset by peer",
+                "connection aborted",
+                "timed out",
+                "host is unreachable",
+                "network is unreachable",
+            )
+        )
 
     def _handle_transient_gateway_error(
         self,
